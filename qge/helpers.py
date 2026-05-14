@@ -108,11 +108,16 @@ def Lchange(
     Snp,
     VAR: np.ndarray,
     io: np.ndarray,
+    H_hat=None,
     *,
     tol: float = 1e-10,
     maxit: int = 1_000_000,
 ) -> tuple[np.ndarray, float, np.ndarray]:
-    """Inner fixed point on relative employment changes L_hat."""
+    """Inner fixed point on relative employment changes L_hat.
+
+    `H_hat` is the optional structures shock (N,) for the Hurricane Katrina
+    application — None / 1 means structures are unaffected.
+    """
     om = np.asarray(om).reshape(-1)
     L_hat = np.asarray(L_hat, dtype=float).reshape(-1).copy()
     Ln = np.asarray(Ln).reshape(-1)
@@ -127,23 +132,25 @@ def Lchange(
     P_index_hat = np.prod(phat ** alphas, axis=0)  # (N,)
     # Matches `if Bn == 0; Bn = 1` in MATLAB: a sentinel for autarky-like cases
     Bn_eff = 1.0 if np.all(Bn_arr == 0) else Bn_arr
+    H_arr = 1.0 if H_hat is None else np.asarray(H_hat, dtype=float).reshape(-1)
+    H_b1 = H_arr ** b1  # broadcasts to (N,) when H_arr is scalar 1.0
 
     Lmax = np.inf
     V_hat = 0.0
     it = 0
     while it < maxit and Lmax > tol:
-        VARp = VAR * om * (L_hat ** (1 - b1))
+        VARp = VAR * om * H_b1 * (L_hat ** (1 - b1))
         Chip = float(np.sum(io * VARp))
         Chinp = Ln * L_hat * Chip
         Bnp = Snp_arr - Chinp + io * VARp
         omreal = om / P_index_hat
 
         V_hat = float(np.sum(
-            (Ln / phi_n) * omreal * (L_hat ** (1 - b1))
+            (Ln / phi_n) * omreal * H_b1 * (L_hat ** (1 - b1))
             - Ln * ((1 - phi_n) / phi_n) * (Bnp / Bn_eff) / P_index_hat
         ))
 
-        num = (
+        num = H_arr * (
             om
             / (
                 phi_n * (P_index_hat * V_hat)
@@ -174,6 +181,7 @@ def expenditure(
     VAR: np.ndarray,
     VAL: np.ndarray,
     io: np.ndarray,
+    H_hat=None,
 ) -> np.ndarray:
     """Total expenditure X' by sector and region, (J, N)."""
     om = np.asarray(om).reshape(-1)
@@ -184,11 +192,11 @@ def expenditure(
     io = np.asarray(io).reshape(-1)
     Snp_arr = np.asarray(Snp, dtype=float) if np.ndim(Snp) else float(Snp)
     b1 = B[0, :]
+    H_b1 = 1.0 if H_hat is None else np.asarray(H_hat, dtype=float).reshape(-1) ** b1
 
-    Lnp = Ln * L_hat
-    VARp = VAR * om * (L_hat ** (1 - b1))
+    VARp = VAR * om * H_b1 * (L_hat ** (1 - b1))
     Chip = float(np.sum(io * VARp))
-    Chinp = Lnp * Chip
+    Chinp = Ln * L_hat * Chip
     Bnp = Snp_arr - Chinp + io * VARp  # (N,)
 
     # NBP[j, n*J + k] = Dinp_3d[k, n, j]   (j=source, n=dest, k=sector)
@@ -199,7 +207,7 @@ def expenditure(
     GP = GG * NNBP
     OM = np.eye(J * N) - GP
 
-    aux = om * (L_hat ** (1 - b1)) * (VAR + VAL) - Bnp  # (N,)
+    aux = om * H_b1 * (L_hat ** (1 - b1)) * (VAR + VAL) - Bnp  # (N,)
     aux2 = np.repeat(aux, J)  # (N*J,)
     alphas_flat = alphas.ravel(order="F")  # MATLAB column-major: (N*J,)
     rhs = alphas_flat * aux2
@@ -218,16 +226,18 @@ def GMC(
     L_hat: np.ndarray,
     VAR: np.ndarray,
     VAL: np.ndarray,
+    H_hat=None,
 ) -> np.ndarray:
     """Goods-market-clearing implied wage update omef0, shape (N,)."""
     L_hat = np.asarray(L_hat).reshape(-1)
     VAR = np.asarray(VAR).reshape(-1)
     VAL = np.asarray(VAL).reshape(-1)
     b1 = B[0, :]
+    H_b1 = 1.0 if H_hat is None else np.asarray(H_hat, dtype=float).reshape(-1) ** b1
 
     DDDinpt = _exports_by_source(Dinp, Xp, J, N)  # (J, N)
     aux5 = np.sum(gamma * DDDinpt, axis=0)  # (N,)
-    return aux5 / ((L_hat ** (1 - b1)) * (VAR + VAL))
+    return aux5 / (H_b1 * (L_hat ** (1 - b1)) * (VAR + VAL))
 
 
 def GOTFP(

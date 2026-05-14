@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 
 from qge.elasticities import ElasticityRow, regional_elasticities, sectoral_elasticities
 from qge.helpers import (
@@ -25,7 +26,7 @@ from qge.helpers import (
     expenditure,
     neweq,
 )
-from qge.io import RawInputs, load_base_year, load_raw_inputs
+from qge.io import RawInputs, _array_to_long, load_base_year, load_raw_inputs
 
 
 # ---------------------------------------------------------------- result types
@@ -45,22 +46,79 @@ class BenchmarkResult:
     LnIn: np.ndarray
     Sn: np.ndarray
     Bn: np.ndarray  # = TD_out of neweq (MATLAB driver renames it on save)
+    sectors: tuple[str, ...]
+    regions: tuple[str, ...]
+
+    def regional_summary(self) -> pd.DataFrame:
+        """Per-region scalar quantities, indexed by region name."""
+        return pd.DataFrame(
+            {
+                "Ln": self.Ln,
+                "VAL": self.VAL,
+                "VAR": self.VAR,
+                "Chin": self.Chin,
+                "LnIn": self.LnIn,
+                "Sn": self.Sn,
+                "Bn": self.Bn,
+            },
+            index=pd.Index(self.regions, name="region"),
+        )
+
+    def employment_shares(self) -> pd.DataFrame:
+        """Per-(sector, region) employment shares (Ljn), summing to 1."""
+        return pd.DataFrame(
+            self.Ljn,
+            index=pd.Index(self.sectors, name="sector"),
+            columns=pd.Index(self.regions, name="region"),
+        )
+
+    def bilateral_trade(self) -> pd.DataFrame:
+        """Long-form bilateral trade flows: (sector, destination, source, value)."""
+        J, N = len(self.sectors), len(self.regions)
+        return _array_to_long(
+            self.xbilat.reshape(J, N, N),
+            ("sector", "destination", "source"),
+            (self.sectors, self.regions, self.regions),
+        )
+
+
+def _sweep_dataframe(elasticities, shocks, labels, index_name: str) -> pd.DataFrame:
+    """Common DataFrame layout for both regional and sectoral sweeps."""
+    return pd.DataFrame(
+        {
+            "TFP_elasticity": [e.TFP for e in elasticities],
+            "GDP_elasticity": [e.GDP for e in elasticities],
+            "welfare_elasticity": [e.welfare for e in elasticities],
+            "iterations": [s.iterations for s in shocks],
+        },
+        index=pd.Index(labels, name=index_name),
+    )
 
 
 @dataclass(frozen=True)
 class RegionalSweepResult:
-    """Output of regional_sweep — 50 shocks plus 50 elasticity rows."""
+    """Output of regional_sweep — one shock + elasticity row per region."""
 
     shocks: list  # list[BenchmarkShockResult]
     elasticities: list  # list[ElasticityRow]
+    regions: tuple[str, ...]
+
+    def as_dataframe(self) -> pd.DataFrame:
+        """Elasticity table indexed by region name."""
+        return _sweep_dataframe(self.elasticities, self.shocks, self.regions, "region")
 
 
 @dataclass(frozen=True)
 class SectoralSweepResult:
-    """Output of sectoral_sweep — 26 shocks plus 26 elasticity rows."""
+    """Output of sectoral_sweep — one shock + elasticity row per sector."""
 
     shocks: list  # list[BenchmarkShockResult]
     elasticities: list  # list[ElasticityRow]
+    sectors: tuple[str, ...]
+
+    def as_dataframe(self) -> pd.DataFrame:
+        """Elasticity table indexed by sector name."""
+        return _sweep_dataframe(self.elasticities, self.shocks, self.sectors, "sector")
 
 
 @dataclass
@@ -89,6 +147,35 @@ class BenchmarkShockResult:
     Dinp: np.ndarray
     Xp: np.ndarray
     iterations: int
+    sectors: tuple[str, ...]
+    regions: tuple[str, ...]
+
+    def regional_summary(self) -> pd.DataFrame:
+        """Per-region post-shock quantities indexed by region name."""
+        return pd.DataFrame(
+            {
+                "L_hat": self.L_hat,
+                "P_index_hat": self.P_index_hat,
+                "TFPn_hat": self.TFPn,
+                "GDPn_hat": self.GDPn,
+                "Yn": self.Yn,
+                "VAn0": self.VAn0,
+                "om": self.om,
+            },
+            index=pd.Index(self.regions, name="region"),
+        )
+
+    def sectoral_summary(self) -> pd.DataFrame:
+        """Per-sector post-shock quantities indexed by sector name."""
+        return pd.DataFrame(
+            {
+                "TFPj_hat": self.TFPj,
+                "GDPj_hat": self.GDPj,
+                "Yj": self.Yj,
+                "VAj0": self.VAj0,
+            },
+            index=pd.Index(self.sectors, name="sector"),
+        )
 
 
 # ---------------------------------------------------------------- private
@@ -96,6 +183,8 @@ class BenchmarkShockResult:
 
 @dataclass(frozen=True)
 class _Calibration:
+    sectors: tuple[str, ...]
+    regions: tuple[str, ...]
     T: np.ndarray
     B: np.ndarray
     G: np.ndarray
@@ -142,6 +231,7 @@ def _build_calibration(raw: RawInputs) -> _Calibration:
     G_3d = (1 - raw.gamma.T)[:, None, :] * IO_norm[None, :, :]
     G = G_3d.reshape(N * J, J)
     return _Calibration(
+        sectors=raw.sectors, regions=raw.regions,
         T=raw.T, B=raw.B, G=G, G_3d=G_3d,
         gamma=raw.gamma, alphas=raw.alphas, io=raw.io, J=J, N=N,
     )
@@ -187,6 +277,7 @@ def _run_outer_loop(
     vfactor: float = -0.1,
     maxit: int = 1_000_000,
     verbose: bool = False,
+    H_hat=None,
 ) -> _LoopState:
     J, N = cal.J, cal.N
     om = np.ones(N)
@@ -203,12 +294,12 @@ def _run_outer_loop(
                         cal.T, J, N, cal.gamma)
         L_hat, V_hat, P_index_hat = Lchange(
             om, phat, cal.alphas, cal.B, L_hat, state.Ln, state.LnIn,
-            state.Bn, Snp, state.VAR, cal.io,
+            state.Bn, Snp, state.VAR, cal.io, H_hat,
         )
         Xp = expenditure(J, N, cal.alphas, cal.B, cal.G, Dinp, om, L_hat,
-                         state.Ln, Snp, state.VAR, state.VAL, cal.io)
+                         state.Ln, Snp, state.VAR, state.VAL, cal.io, H_hat)
         omef0 = GMC(Xp, Dinp, J, N, cal.B, cal.gamma, state.LnIn, L_hat,
-                    state.VAR, state.VAL)
+                    state.VAR, state.VAL, H_hat)
         om1 = om * (1 + vfactor * (om - omef0) / om)
         ommax = float(np.sum(np.abs(om1 - om)))
         om = om1
@@ -253,6 +344,7 @@ def _post_shock_accounting(
         VAn0=VAn0, VA0=VA0, VAj0=VAj0,
         om=loop.om, Dinp=loop.Dinp, Xp=loop.Xp,
         iterations=loop.iterations,
+        sectors=cal.sectors, regions=cal.regions,
     )
 
 
@@ -312,6 +404,7 @@ def compute_baseline(
         Ln=out["Ln"], xbilat=out["xbilat"], VAR=out["VAR"], VAL=out["VAL"],
         Ljn=out["Ljn"], Chi=out["Chi"], Chin=out["Chin"], LnIn=out["LnIn"],
         Sn=out["Sn"], Bn=out["TD"],
+        sectors=cal.sectors, regions=cal.regions,
     )
 
 
@@ -324,16 +417,19 @@ def _run_shock(
     vfactor: float,
     maxit: int,
     verbose: bool,
+    H_hat=None,
+    kappa_hat: Optional[np.ndarray] = None,
 ) -> BenchmarkShockResult:
     if raw is None:
         raw = load_raw_inputs()
     cal = _build_calibration(raw)
     xbilat, Ln, _ = _baseline_quantities(baseline)
     state = _derive_from_xbilat(xbilat, Ln, cal)
-    kappa_hat = np.ones((cal.J * cal.N, cal.N))
+    if kappa_hat is None:
+        kappa_hat = np.ones((cal.J * cal.N, cal.N))
     loop = _run_outer_loop(
         state, cal, kappa_hat, lambda_hat, Snp=0.0,  # MATLAB sets Sn = 0; Snp = Sn
-        tol=tol, vfactor=vfactor, maxit=maxit, verbose=verbose,
+        tol=tol, vfactor=vfactor, maxit=maxit, verbose=verbose, H_hat=H_hat,
     )
     return _post_shock_accounting(loop, state, cal)
 
@@ -446,7 +542,9 @@ def regional_sweep(
                 f"  region {region + 1:2d}/{cal.N}  iters={sres.iterations:4d}  "
                 f"TFP={row.TFP:+.4f}  GDP={row.GDP:+.4f}  welfare={row.welfare:+.4f}"
             )
-    return RegionalSweepResult(shocks=shocks, elasticities=elast_rows)
+    return RegionalSweepResult(
+        shocks=shocks, elasticities=elast_rows, regions=cal.regions,
+    )
 
 
 def sectoral_sweep(
@@ -492,4 +590,6 @@ def sectoral_sweep(
                 f"  sector {sector + 1:2d}/{cal.J}  iters={sres.iterations:4d}  "
                 f"TFP={row.TFP:+.4f}  GDP={row.GDP:+.4f}  welfare={row.welfare:+.4f}"
             )
-    return SectoralSweepResult(shocks=shocks, elasticities=elast_rows)
+    return SectoralSweepResult(
+        shocks=shocks, elasticities=elast_rows, sectors=cal.sectors,
+    )

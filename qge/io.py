@@ -159,6 +159,19 @@ def _long_to_array(
     return out
 
 
+def _load_long_array(
+    path: Path,
+    dim_cols: Sequence[str],
+    dim_labels: Sequence[Sequence[str]],
+) -> np.ndarray:
+    """Read a long-form parquet and reshape into an N-D numpy array.
+
+    Convenience wrapper over `pd.read_parquet` + `_long_to_array`. Each
+    `dim_cols[i]` is expected to take values from `dim_labels[i]`.
+    """
+    return _long_to_array(pd.read_parquet(path), dim_cols, "value", dim_labels)
+
+
 def _array_to_long(
     arr: np.ndarray,
     dim_cols: Sequence[str],

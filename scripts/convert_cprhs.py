@@ -11,7 +11,9 @@ Usage::
 
 from __future__ import annotations
 
-from qge.io import INPUTS_ROOT, _array_to_long, load_raw_inputs_from_mat
+import numpy as np
+
+from qge.io import INPUTS_ROOT, MATLAB_ROOT, _array_to_long, load_raw_inputs_from_mat
 
 
 _README_TEMPLATE = """# CPRHS 2017 reference calibration
@@ -78,6 +80,48 @@ def main() -> None:
     readme = out_dir / "README.md"
     readme.write_text(_README_TEMPLATE)
     print(f"  wrote {readme}")
+
+    # Application-specific shock data: measured TFP changes 2002-2007
+    # (Lambdas.txt) and the North Dakota productivity-shock vector.
+    app_src = MATLAB_ROOT / "Applications"
+    app_dir = out_dir / "applications"
+    app_dir.mkdir(parents=True, exist_ok=True)
+
+    lambdas = np.loadtxt(app_src / "Lambdas.txt")  # (J, N)
+    north_dakota = np.loadtxt(app_src / "lambda_northdakota.txt")  # (J,)
+    app_tables = {
+        "measured_tfp_2002_2007.parquet":
+            _array_to_long(lambdas, ("sector", "region"), (sectors, regions)),
+        "north_dakota_lambda.parquet":
+            _array_to_long(north_dakota, ("sector",), (sectors,)),
+    }
+    for name, df in app_tables.items():
+        path = app_dir / name
+        df.to_parquet(path, index=False)
+        print(f"  wrote {path}  ({len(df):>6d} rows, {path.stat().st_size/1024:6.1f} KiB)")
+
+    # Geographic-barriers kappa_hat shocks. MATLAB ships only the
+    # tradable rows (15 sectors × 50 destinations = 750 rows); we expand to
+    # the full (J, N, N) shape with non-tradable entries set to 1.0.
+    geo_src = MATLAB_ROOT / "Geographic_barriers"
+    geo_dir = out_dir / "geographic_barriers"
+    geo_dir.mkdir(parents=True, exist_ok=True)
+    JT = 15  # tradable sector count (CPRHS convention)
+    for txt_name, parquet_name in [
+        ("ch_distance.txt",       "kappa_distance.parquet"),
+        ("ch_other_barriers.txt", "kappa_other_barriers.parquet"),
+    ]:
+        tradable_block = np.loadtxt(geo_src / txt_name)  # (JT*N, N)
+        kappa_full = np.ones((raw.J, raw.N, raw.N))
+        kappa_full[:JT] = tradable_block.reshape(JT, raw.N, raw.N)
+        df = _array_to_long(
+            kappa_full,
+            ("sector", "destination", "source"),
+            (sectors, regions, regions),
+        )
+        path = geo_dir / parquet_name
+        df.to_parquet(path, index=False)
+        print(f"  wrote {path}  ({len(df):>6d} rows, {path.stat().st_size/1024:6.1f} KiB)")
 
 
 if __name__ == "__main__":

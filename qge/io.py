@@ -301,6 +301,26 @@ def _validate(raw: RawInputs) -> None:
             f"IO column {zero_cols} sums to 0 (destination sector has no "
             f"intermediate inputs); IO column-normalization would divide by zero"
         )
+    # Interior-equilibrium requirement: the hat algebra computes ratios between
+    # two equilibria, so every (sector, region) cell must have strictly positive
+    # gross output in the baseline. Eaton-Kortum's Fréchet productivity assigns
+    # every region positive expected output in every sector; zero cells fall
+    # outside the model's domain. If your data has zero cells, aggregate
+    # sectors or regions until every cell is interior.
+    gross_output = raw.xbilat.reshape(J, N, N).sum(axis=1)  # (J, N) by (sector, source)
+    zero_cells = np.argwhere(gross_output == 0)
+    if len(zero_cells) > 0:
+        examples = "; ".join(
+            f"{raw.sectors[j]!r} in {raw.regions[n]!r}"
+            for j, n in zero_cells[:5]
+        )
+        more = "" if len(zero_cells) <= 5 else f" (and {len(zero_cells) - 5} more)"
+        raise ValueError(
+            f"{len(zero_cells)} (sector, region) cell(s) have zero gross output; "
+            f"the hat algebra requires interior equilibria (positive production "
+            f"in every cell). Aggregate sectors or regions until every cell is "
+            f"interior. First examples: {examples}{more}"
+        )
 
 
 def _collapse_to_region_vector(

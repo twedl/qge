@@ -55,29 +55,19 @@ def test_validate_rejects_wrong_shape(raw):
         _validate(replace(raw, L_j_n=truncated))
 
 
-def test_handles_zero_production_cells(raw):
-    """A (sector, region) cell with truly zero gross output should produce
-    Ljn = 0 (not NaN), and aggregate quantities should be finite.
-
-    This case doesn't arise in CPRHS data (every cell has positive output
-    via measurement quirks) but is expected for Canadian data — e.g. PEI
-    has no petroleum production.
+def test_validate_rejects_zero_production_cells(raw):
+    """Zero gross output in any (sector, region) cell is outside the hat-
+    algebra's domain — the model requires interior equilibria. The loader
+    must reject such data at the boundary with a clear instruction.
     """
-    from qge.models.benchmark import compute_baseline, compute_regional_shock
-
-    sec, reg = 4, 10  # Petroleum and Coal, Hawaii — a CPRHS-positive cell we'll zero out
+    sec, reg = 4, 10  # Petroleum and Coal in Hawaii — currently interior in CPRHS
     J = len(raw.sectors)
     xbilat_3d = raw.xbilat.reshape(J, raw.N, raw.N).copy()
-    xbilat_3d[sec, :, reg] = 0.0  # the source state produces nothing in this sector
+    xbilat_3d[sec, :, reg] = 0.0  # zero production in this cell
     raw_zero = replace(raw, xbilat=xbilat_3d.reshape(J * raw.N, raw.N))
 
-    baseline = compute_baseline(raw=raw_zero, tol=1e-10)
-    assert baseline.Ljn[sec, reg] == 0.0
-    assert not np.isnan(baseline.Ljn).any()
-
-    shock = compute_regional_shock(region=4, raw=raw_zero, baseline=baseline, tol=1e-10)
-    assert not np.isnan(shock.Ljn_hat).any()
-    assert np.isfinite(shock.TFP_hat) and np.isfinite(shock.GDP_hat)
+    with pytest.raises(ValueError, match="zero gross output|interior equilibria"):
+        _validate(raw_zero)
 
 
 def test_benchmark_golden_loads(benchmark_golden):

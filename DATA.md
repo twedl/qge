@@ -4,6 +4,20 @@ Reference for everything the model reads. The intended audience is anyone prepar
 
 For shape, `J` = number of sectors and `N` = number of regions in your calibration. CPRHS uses `J = 26`, `N = 50` (US states with Virginia and DC merged). The model is dimension-generic; nothing in `qge/` requires those specific values.
 
+## Hard prerequisite: interior equilibria
+
+The model is a *change between two equilibria*. Both the baseline and any counterfactual must be valid equilibria, which means **every `(sector, region)` cell must have strictly positive gross output**. Eaton-Kortum's Fréchet productivity assigns every region positive expected output in every sector — zero cells fall outside the model's domain, not just its numerical tolerance.
+
+`qge.io.load_inputs` enforces this at load time: a calibration with a `(sector, region)` cell whose gross output (sum of bilateral exports from that source in that sector) is zero will be rejected with the offending cells named.
+
+**Practical implication for taxonomy choice.** Your sector × region grid must be coarse enough that every cell has positive production. If your candidate taxonomy has empty cells (e.g. *Petroleum and Coal* × *PEI*), you have to aggregate:
+
+- *sector consolidation* — fold the empty sector into a broader category until production is positive everywhere; or
+- *region consolidation* — merge the empty region with neighbours (e.g. Maritime provinces); or
+- *both* — likely necessary for Canadian data at province × ~25-sector granularity.
+
+Aggregation loses analytical detail (you can't decompose effects within the aggregate), but it's the price of staying inside the model's domain.
+
 ## Eight core calibration files
 
 Each file lives at `data/inputs/<calibration_name>/<filename>.parquet`. All categorical columns hold human-readable labels (string sector and region names); the numerical column is always called `value`.

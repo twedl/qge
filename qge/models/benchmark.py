@@ -328,12 +328,7 @@ def _post_shock_accounting(
 
     VALjn = cal.gamma * (1 - cal.B) * Exjn0
     VARjn = (cal.B / (1 - cal.B)) * VALjn
-    # 0/0 cells (no production in this (sector, region)) → 0, not NaN.
-    denom = VALjn * wf0[None, :]
-    Ljn_hat = np.divide(
-        cal.gamma * (1 - cal.B) * Exjn, denom,
-        out=np.zeros_like(denom), where=(denom > 0),
-    )
+    Ljn_hat = (1.0 / (VALjn * wf0[None, :])) * cal.gamma * (1 - cal.B) * Exjn
 
     TFP_hat, TFPj, TFPn, _, _, Yj, Yn, Y = GOTFP(loop.c, loop.phat, Exjn0, J, N)
     GDP_hat, GDPj, GDPn, _, VAj0, VAn0, VA0 = GDP(

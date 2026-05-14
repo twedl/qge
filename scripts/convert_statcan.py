@@ -406,6 +406,76 @@ def build_employment(year: int = DEFAULT_YEAR) -> pd.DataFrame:
     return out.sort_values(["sector", "region"]).reset_index(drop=True)
 
 
+# ---------------------------------------------------------------- sectoral dispersion
+
+# θ_j (Eaton-Kortum trade elasticity per sector). We store 1/θ in the parquet
+# to match the qge model's convention. Source: CPRHS 2017 Table — the same
+# values used in their US calibration, mapped onto our 23-sector Canadian
+# taxonomy. Where our sectors aggregate two CPRHS sectors, we use the simple
+# arithmetic mean of (1/θ). For sectors with no CPRHS analog (Agriculture and
+# Mining — CPRHS treats them differently or omits them), we use the CPRHS
+# default for non-tradables (1/4.55 ≈ 0.22). A future refinement is to plug
+# in published sector-specific Canadian θ estimates.
+THETA = 4.55  # CPRHS default non-tradable elasticity (services)
+
+
+def _cprhs_theta_per_sector() -> dict[str, float]:
+    """Return 1/θ per Canadian sector, borrowing CPRHS values where possible."""
+    avg = lambda *values: sum(1 / v for v in values) / len(values)
+    return {
+        "Agriculture, Forestry, Fishing":          1 / THETA,  # no CPRHS analog
+        "Mining and Extraction":                   1 / THETA,  # no CPRHS analog
+        "Utilities":                               1 / THETA,
+        "Construction":                            1 / THETA,
+        "Food, Beverage, Tobacco":                 1 / 2.55,
+        "Textile, Apparel, Leather":               1 / 5.56,
+        "Wood, Paper, Printing":                   avg(9.46, 9.07),   # CPRHS 3, 4
+        "Petroleum and Chemicals":                 avg(51.08, 4.75, 1.66),  # CPRHS 5, 6, 7
+        "Non-metallic Mineral Products":           1 / 2.76,
+        "Metals and Machinery":                    avg(6.78, 1.52),   # CPRHS 9, 10
+        "Computers, Electronics, Electrical":      avg(12.79, 10.60), # CPRHS 11, 12
+        "Transportation Equipment":                1 / 1.01,
+        "Furniture and Other Manufacturing":       1 / 5.00,          # CPRHS 14, 15 both 5
+        "Wholesale and Retail Trade":              1 / THETA,
+        "Transportation Services":                 1 / THETA,
+        "Information and Communication":           1 / THETA,
+        "Finance and Insurance":                   1 / THETA,
+        "Real Estate, Rental, Leasing":            1 / THETA,
+        "Professional and Administrative Services": 1 / THETA,
+        "Education":                               1 / THETA,
+        "Health":                                  1 / THETA,
+        "Arts, Recreation, Accommodation, Food":   1 / THETA,
+        "Public Administration and Other Services": 1 / THETA,
+    }
+
+
+def build_sectoral_dispersion() -> pd.DataFrame:
+    """Long-form (sector, value) carrying 1/θ_j for the 23 Canadian sectors."""
+    thetas = _cprhs_theta_per_sector()
+    sectors = tuple(s for s, _ in NAICS_TO_SECTOR)
+    missing = [s for s in sectors if s not in thetas]
+    if missing:
+        raise ValueError(f"theta missing for: {missing}")
+    return pd.DataFrame(
+        {"sector": sectors, "value": [thetas[s] for s in sectors]}
+    )
+
+
+# ---------------------------------------------------------------- portfolio share
+
+def build_portfolio_share() -> pd.DataFrame:
+    """Long-form (region, value) carrying ι_n = 0 — closed-province assumption.
+
+    CPRHS calibrate ι_n as a residual to match observed US trade balances,
+    treating it as the fraction of a region's structures rents flowing into a
+    global portfolio. For an initial Canadian calibration we set ι ≡ 0 (every
+    province retains all its capital income). This is the simplest defensible
+    starting point per the DATA.md guidance and can be tuned later once we
+    have interprovincial current-account estimates.
+    """
+    return pd.DataFrame({"region": list(PROVINCES), "value": [0.0] * len(PROVINCES)})
+
+
 # ---------------------------------------------------------------- diagnostics
 
 
@@ -473,6 +543,22 @@ def main() -> None:
     path = out_dir / "employment.parquet"
     employment.to_parquet(path, index=False)
     print(f"  wrote {path}  ({len(employment):>6d} rows, "
+          f"{path.stat().st_size/1024:6.1f} KiB)")
+    print()
+
+    print("Building sectoral_dispersion.parquet (CPRHS θ values)...")
+    theta = build_sectoral_dispersion()
+    path = out_dir / "sectoral_dispersion.parquet"
+    theta.to_parquet(path, index=False)
+    print(f"  wrote {path}  ({len(theta):>6d} rows, "
+          f"{path.stat().st_size/1024:6.1f} KiB)")
+    print()
+
+    print("Building portfolio_share.parquet (ι ≡ 0 — closed province)...")
+    iota = build_portfolio_share()
+    path = out_dir / "portfolio_share.parquet"
+    iota.to_parquet(path, index=False)
+    print(f"  wrote {path}  ({len(iota):>6d} rows, "
           f"{path.stat().st_size/1024:6.1f} KiB)")
 
 

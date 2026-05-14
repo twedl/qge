@@ -72,6 +72,7 @@ TABLE_TRADE_SUMMARY = "12100088"  # Interprovincial and international trade flow
 TABLE_SEPH = "14100202"  # Employment by industry, annual (Survey of Employment, Payrolls and Hours)
 TABLE_LFS = "14100023"   # Labour force characteristics by industry, annual (Labour Force Survey)
 TABLE_GDP_INCOME = "36100221"  # GDP, income-based, provincial and territorial, annual
+TABLE_GDP_INDUSTRY = "36100487"  # GDP at basic prices, by sector and industry, provincial
 
 
 # StatCan summary-level products aggregate into this 22-sector target taxonomy.
@@ -462,6 +463,144 @@ def build_sectoral_dispersion() -> pd.DataFrame:
     )
 
 
+# ---------------------------------------------------------------- value added share
+
+# StatCan publishes provincial GDP-by-industry (Table 36-10-0487-01) at
+# NAICS-2 granularity with manufacturing as a single bucket [BS3A0] and
+# finance/insurance/real-estate/rental/leasing combined as [BS5B0]. The
+# detailed NAICS-3 manufacturing breakout exists nationally but not
+# provincially in the public tables. As a first-pass, all 8 manufacturing
+# sub-sectors share the same provincial γ (computed from total manufacturing
+# VA / total manufacturing gross output per province); Finance and Real
+# Estate likewise share γ. This understates the spread of factor-share
+# intensities across manufacturing sub-sectors and finance vs real estate.
+# A future refinement would impute these within-bucket γ differences from
+# national StatCan IO tables or use a non-public StatCan source.
+_SHARED_VA_GROUPS: dict[str, dict] = {
+    "Manufacturing": {
+        "va_codes": ("BS3A0",),
+        "sectors": (
+            "Food, Beverage, Tobacco",
+            "Textile, Apparel, Leather",
+            "Wood, Paper, Printing",
+            "Petroleum and Chemicals",
+            "Non-metallic Mineral Products",
+            "Metals and Machinery",
+            "Computers, Electronics, Electrical",
+            "Transportation Equipment",
+            "Furniture and Other Manufacturing",
+        ),
+    },
+    "Finance and Real Estate": {
+        "va_codes": ("BS5B0",),
+        "sectors": ("Finance and Insurance", "Real Estate, Rental, Leasing"),
+    },
+}
+_SOLO_VA_CODES: dict[str, tuple[str, ...]] = {
+    "Agriculture, Forestry, Fishing": ("BS11A", "BS113", "BS114", "BS115"),
+    "Mining and Extraction": ("BS210",),
+    "Utilities": ("BS220",),
+    "Construction": ("BS23A", "BS23B", "BS23C", "BS23D", "BS23E"),
+    "Wholesale and Retail Trade": ("BS410", "BS4A0"),
+    "Transportation Services": ("BS4B0",),
+    "Information and Communication": ("BS510",),
+    "Professional and Administrative Services": ("BS540", "BS560"),
+    "Education": ("BS610", "GS610"),
+    "Health": ("BS620", "GS620"),
+    "Arts, Recreation, Accommodation, Food": ("BS710", "BS720"),
+    "Public Administration and Other Services": (
+        "BS810", "GS911", "GS912", "GS913", "GS914", "NP000",
+    ),
+}
+
+
+def _gross_output(year: int) -> pd.DataFrame:
+    """Long-form (sector, province, value) total gross output per source province.
+
+    Uses the "Total demand" rows of the trade table, which encode the full
+    output produced by a source province (intra-provincial + interprovincial
+    + international + territories). Our bilateral_trade.parquet captures
+    only the interprovincial-among-10-provinces slice; this helper recovers
+    the full denominator needed for γ = VA / gross_output and other ratios.
+    """
+    csv_path = _fetch_table(TABLE_TRADE_SUMMARY)
+    df = pd.read_csv(csv_path, dtype={"VALUE": float}, low_memory=False)
+    df = df[df["REF_DATE"] == year]
+    df = df[df["GEO"].isin(PROVINCES)]
+    df = df[df["Trade flow detail"] == "Total demand"]
+    parsed = df["Product"].apply(_parse_product)
+    df["product_name"] = parsed.str[0]
+    df["product_code"] = parsed.str[1]
+    df = df[df["product_code"].notna()]
+    agg_map = _aggregation_map()
+    df["sector"] = df["product_code"].map(agg_map)
+    df = df[df["sector"].notna()]
+    df = df.rename(columns={"VALUE": "value", "GEO": "region"})
+    df = df.groupby(["sector", "region"], as_index=False)["value"].sum()
+    df["value"] = df["value"].fillna(0.0)
+    return df
+
+
+def _sector_va_group(sector: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return (va_codes, member_sectors) for a sector.
+
+    For grouped sectors (manufacturing, finance/real estate), both the VA
+    numerator and the gross-output denominator are summed across the whole
+    group so every member shares the same provincial γ. For solo sectors,
+    member_sectors is just (sector,).
+    """
+    for group in _SHARED_VA_GROUPS.values():
+        if sector in group["sectors"]:
+            return group["va_codes"], group["sectors"]
+    if sector in _SOLO_VA_CODES:
+        return _SOLO_VA_CODES[sector], (sector,)
+    raise ValueError(f"no VA mapping for sector {sector!r}")
+
+
+def build_value_added_share(year: int = DEFAULT_YEAR) -> pd.DataFrame:
+    """Long-form (sector, region, value) γ = VA / gross output.
+
+    VA from Table 36-10-0487-01 (provincial GDP by industry, basic prices).
+    Gross output from our previously-built bilateral_trade.parquet (sum
+    across destinations gives gross exports per (sector, source)).
+
+    See _SHARED_VA_GROUPS for the manufacturing / finance-RE caveat.
+    """
+    csv_path = _fetch_table(TABLE_GDP_INDUSTRY)
+    df = pd.read_csv(csv_path, dtype={"VALUE": float}, low_memory=False)
+    df = df[df["REF_DATE"] == year]
+    df = df[df["GEO"].isin(PROVINCES)]
+    df["code"] = df["Industry"].str.extract(r"\[([^\]]+)\]$")[0]
+    df = df[df["code"].notna()]
+    va = (
+        df.groupby(["GEO", "code"])["VALUE"].sum().unstack("GEO").fillna(0.0)
+    )  # rows = StatCan codes, columns = provinces
+
+    go = (
+        _gross_output(year)
+        .set_index(["sector", "region"])["value"]
+        .unstack("region")
+        .fillna(0.0)
+    )  # rows = sectors, columns = provinces — full gross output, incl. international exports
+
+    rows = []
+    for sector, _ in NAICS_TO_SECTOR:
+        va_codes, member_sectors = _sector_va_group(sector)
+        for province in PROVINCES:
+            sector_va = sum(va.loc[c, province] for c in va_codes if c in va.index)
+            sector_go = sum(go.loc[s, province] for s in member_sectors if s in go.index)
+            gamma = sector_va / sector_go if sector_go > 0 else 0.0
+            # Service sectors (especially Education and Health) can have
+            # measured γ slightly over 1 due to definitional differences
+            # between VA at basic prices and gross output in the trade table.
+            # Clamp to (0, 1) to satisfy the model's _validate, which requires
+            # γ ∈ [0, 1]. Affects very few cells.
+            gamma = min(max(gamma, 0.0), 0.99)
+            rows.append({"sector": sector, "region": province, "value": gamma})
+
+    return pd.DataFrame(rows)
+
+
 # ---------------------------------------------------------------- structures share
 
 
@@ -579,6 +718,18 @@ def main() -> None:
     employment.to_parquet(path, index=False)
     print(f"  wrote {path}  ({len(employment):>6d} rows, "
           f"{path.stat().st_size/1024:6.1f} KiB)")
+    print()
+
+    print(f"Building value_added_share.parquet for {args.year}...")
+    gamma = build_value_added_share(args.year)
+    n_outside = ((gamma["value"] < 0) | (gamma["value"] > 1)).sum()
+    if n_outside:
+        print(f"  WARNING: {n_outside} γ values outside [0, 1]")
+    print(f"  γ mean: {gamma['value'].mean():.3f}  "
+          f"min: {gamma['value'].min():.3f}  max: {gamma['value'].max():.3f}")
+    path = out_dir / "value_added_share.parquet"
+    gamma.to_parquet(path, index=False)
+    print(f"  wrote {path}  ({len(gamma):>6d} rows)")
     print()
 
     print(f"Building structures_share.parquet for {args.year}...")

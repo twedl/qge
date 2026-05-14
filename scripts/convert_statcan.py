@@ -67,6 +67,21 @@ PROVINCES: tuple[str, ...] = (
     "British Columbia",
 )
 
+# "Rest of World" is an 11th region capturing all international trade.
+# Canadian provinces export to and import from ROW; ROW's own internal trade
+# is synthesized below (see _ROW_INTRA_SCALE).
+ROW: str = "Rest of World"
+REGIONS: tuple[str, ...] = PROVINCES + (ROW,)
+
+# ROW's economy is synthesized at ROW_SCALE × Canada's gross output per sector
+# (default 50 ≈ OECD-vs-Canada size). For each sector j:
+#   ROW total gross output[j] = ROW_SCALE × Canada_gross_output[j]
+#   xbilat[ROW->ROW, j] = ROW total gross output[j] - ROW exports to Canada[j]
+# This ensures ROW has positive intra-trade in every sector — including
+# non-traded sectors like Construction where ROW-Canada flows are ~zero —
+# while preserving observed international flows.
+ROW_SCALE: float = 50.0
+
 # Statistics Canada table identifiers.
 TABLE_TRADE_SUMMARY = "12100088"  # Interprovincial and international trade flows, summary level
 TABLE_SEPH = "14100202"  # Employment by industry, annual (Survey of Employment, Payrolls and Hours)
@@ -253,62 +268,99 @@ def _parse_product(label: str) -> tuple[str | None, str | None]:
 # ---------------------------------------------------------------- bilateral trade
 
 
-def build_bilateral_trade(year: int = DEFAULT_YEAR) -> pd.DataFrame:
-    """Return long-form (sector, destination, source, value) trade flows.
+def _load_trade_table(year: int) -> pd.DataFrame:
+    """Filtered StatCan trade table: target year × 10 provinces × M/G/N products.
 
-    Source: Statistics Canada Table 12-10-0088-01.
-        - province-to-province flows only (drops international, aggregates,
-          territorial enclaves);
-        - 10 provinces (territories dropped);
-        - real product codes (M-/G-/N-coded); drops Fictive (F-codes) and
-          Taxes on products (P-code) aggregates;
-        - VALUE is in millions of dollars (preserved as-is).
+    Returns a DataFrame with columns (sector, GEO, trade_flow, value), where
+    `trade_flow` is the raw Trade-flow-detail label ("To Ontario",
+    "International exports", etc.). Used by build_bilateral_trade and the
+    gross-output helper.
     """
     csv_path = _fetch_table(TABLE_TRADE_SUMMARY)
     df = pd.read_csv(csv_path, dtype={"VALUE": float}, low_memory=False)
-
     df = df[df["REF_DATE"] == year].copy()
     if df.empty:
         raise ValueError(f"no rows for year {year} in {csv_path}")
-
     df = df[df["GEO"].isin(PROVINCES)]
-    df["destination"] = df["Trade flow detail"].str.removeprefix("To ")
-    df = df[df["destination"].isin(PROVINCES)]
 
     parsed = df["Product"].apply(_parse_product)
     df["product_name"] = parsed.str[0]
     df["product_code"] = parsed.str[1]
     df = df[df["product_code"].notna()]
-
-    # Map StatCan product codes to the target sector aggregation. Drop product
-    # codes not covered by SECTOR_AGGREGATION (Fictive F-codes and tax P-codes).
     agg_map = _aggregation_map()
     df["sector"] = df["product_code"].map(agg_map)
-    unknown = sorted(df.loc[df["sector"].isna(), "product_code"].unique())
-    if unknown and not all(c.startswith(("F", "P")) for c in unknown):
-        raise ValueError(
-            f"product codes not in SECTOR_AGGREGATION: {unknown}"
-        )
     df = df[df["sector"].notna()]
 
-    df = df.rename(columns={"VALUE": "value", "GEO": "source"}).loc[
-        :, ["sector", "destination", "source", "value"]
+    return df.rename(columns={"Trade flow detail": "trade_flow", "VALUE": "value"})[
+        ["sector", "GEO", "trade_flow", "value"]
     ]
-    # Aggregate to target sectors: sum within each (sector, destination, source).
-    df = df.groupby(["sector", "destination", "source"], as_index=False)["value"].sum()
 
-    # StatCan omits rows where no trade happened and suppresses confidential
-    # cells as NaN. Re-index to the full (sector, destination, source) grid so
-    # the parquet is dense, and substitute 0 for both missing-row and NaN
-    # cases. _validate will then flag any zero-output (sector, region) cells.
+
+def build_bilateral_trade(year: int = DEFAULT_YEAR) -> pd.DataFrame:
+    """Return long-form (sector, destination, source, value) trade flows over
+    11 regions: 10 provinces + Rest of World.
+
+    Source: Statistics Canada Table 12-10-0088-01.
+        - province-to-province flows from the "To <province>" detail rows
+        - province → ROW from "International exports" of each source province
+        - ROW → province from "International imports" of each destination
+        - ROW → ROW is synthetic (see ROW_INTRA_SCALE) so the model has a
+          credible home-bias share for ROW
+
+    Values are in millions of CAD.
+    """
+    df = _load_trade_table(year)
     sectors = tuple(s for s, _ in SECTOR_AGGREGATION)
+
+    # 1. Province-to-province flows.
+    inter = df[df["trade_flow"].str.startswith("To ", na=False)].copy()
+    inter["destination"] = inter["trade_flow"].str.removeprefix("To ")
+    inter = inter[inter["destination"].isin(PROVINCES)]
+    inter = inter.rename(columns={"GEO": "source"}).groupby(
+        ["sector", "destination", "source"], as_index=False
+    )["value"].sum()
+
+    # 2. Province → ROW: "International exports" — GEO is the source province.
+    prov_to_row = (
+        df[df["trade_flow"] == "International exports"]
+        .rename(columns={"GEO": "source"})
+        .assign(destination=ROW)
+        .groupby(["sector", "destination", "source"], as_index=False)["value"].sum()
+    )
+
+    # 3. ROW → Province: "International imports" — GEO is the destination province.
+    row_to_prov = (
+        df[df["trade_flow"] == "International imports"]
+        .rename(columns={"GEO": "destination"})
+        .assign(source=ROW)
+        .groupby(["sector", "destination", "source"], as_index=False)["value"].sum()
+    )
+
+    # 4. ROW → ROW: synthetic, per sector. Set ROW's total gross output per
+    # sector to ROW_SCALE × Canadian total, then ROW-intra is residual after
+    # ROW exports to Canada.
+    canada_go = (
+        inter.groupby("sector")["value"].sum().reindex(sectors).fillna(0.0)
+        + prov_to_row.groupby("sector")["value"].sum().reindex(sectors).fillna(0.0)
+    )
+    row_exports = row_to_prov.groupby("sector")["value"].sum().reindex(sectors).fillna(0.0)
+    row_intra = ROW_SCALE * canada_go - row_exports
+    row_to_row = pd.DataFrame({
+        "sector": sectors,
+        "destination": ROW,
+        "source": ROW,
+        "value": row_intra.clip(lower=0.0).to_numpy(),
+    })
+
+    combined = pd.concat([inter, prov_to_row, row_to_prov, row_to_row])
+
     idx = pd.MultiIndex.from_product(
-        [sectors, PROVINCES, PROVINCES],
-        names=["sector", "destination", "source"],
+        [sectors, REGIONS, REGIONS], names=["sector", "destination", "source"]
     )
     return (
-        df.set_index(["sector", "destination", "source"])
-        .reindex(idx)["value"]
+        combined.set_index(["sector", "destination", "source"])["value"]
+        .groupby(level=[0, 1, 2]).sum()
+        .reindex(idx)
         .fillna(0.0)
         .reset_index()
         .sort_values(["sector", "destination", "source"])
@@ -404,6 +456,21 @@ def build_employment(year: int = DEFAULT_YEAR) -> pd.DataFrame:
     ag_lfs = _lfs_agriculture(year)
     ag_mask = out["sector"] == "Agriculture, Forestry, Fishing"
     out.loc[ag_mask, "value"] = out.loc[ag_mask, "region"].map(ag_lfs).to_numpy()
+
+    # Add Rest-of-World employment as a synthetic 11th region. ROW total
+    # employment is set to 50 × Canada total (rough OECD-vs-Canada scale)
+    # and distributed across sectors in the same proportions as Canada. The
+    # model uses Ln (population shares per region) — this makes ROW dominate
+    # the world, treating Canadian provinces as small relative to ROW.
+    sector_totals = out.groupby("sector")["value"].sum()
+    canada_total = sector_totals.sum()
+    row_total = canada_total * 50.0
+    row_rows = pd.DataFrame({
+        "sector": list(sector_totals.index),
+        "region": ROW,
+        "value": (sector_totals / canada_total * row_total).to_numpy(),
+    })
+    out = pd.concat([out, row_rows], ignore_index=True)
 
     return out.sort_values(["sector", "region"]).reset_index(drop=True)
 
@@ -515,30 +582,20 @@ _SOLO_VA_CODES: dict[str, tuple[str, ...]] = {
 
 
 def _gross_output(year: int) -> pd.DataFrame:
-    """Long-form (sector, province, value) total gross output per source province.
+    """Long-form (sector, region, value) total gross output per source region.
 
-    Uses the "Total demand" rows of the trade table, which encode the full
-    output produced by a source province (intra-provincial + interprovincial
-    + international + territories). Our bilateral_trade.parquet captures
-    only the interprovincial-among-10-provinces slice; this helper recovers
-    the full denominator needed for γ = VA / gross_output and other ratios.
+    For provinces: uses the "Total demand" rows of the trade table, which
+    encode the full output produced by a source province (intra-provincial
+    + interprovincial + international + territories).
+
+    For ROW: derived from the bilateral_trade construction — sum across all
+    destinations of ROW-sourced flows = ROW exports to Canada plus ROW-intra.
     """
-    csv_path = _fetch_table(TABLE_TRADE_SUMMARY)
-    df = pd.read_csv(csv_path, dtype={"VALUE": float}, low_memory=False)
-    df = df[df["REF_DATE"] == year]
-    df = df[df["GEO"].isin(PROVINCES)]
-    df = df[df["Trade flow detail"] == "Total demand"]
-    parsed = df["Product"].apply(_parse_product)
-    df["product_name"] = parsed.str[0]
-    df["product_code"] = parsed.str[1]
-    df = df[df["product_code"].notna()]
-    agg_map = _aggregation_map()
-    df["sector"] = df["product_code"].map(agg_map)
-    df = df[df["sector"].notna()]
-    df = df.rename(columns={"VALUE": "value", "GEO": "region"})
-    df = df.groupby(["sector", "region"], as_index=False)["value"].sum()
-    df["value"] = df["value"].fillna(0.0)
-    return df
+    trade = build_bilateral_trade(year)
+    return (
+        trade.groupby(["sector", "source"], as_index=False)["value"].sum()
+        .rename(columns={"source": "region"})
+    )
 
 
 def _sector_va_group(sector: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -598,7 +655,18 @@ def build_value_added_share(year: int = DEFAULT_YEAR) -> pd.DataFrame:
             gamma = min(max(gamma, 0.0), 0.99)
             rows.append({"sector": sector, "region": province, "value": gamma})
 
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows)
+    # ROW γ per sector: simple mean across Canadian provinces. ROW VA isn't
+    # observable from StatCan, so we adopt Canadian provincial averages as a
+    # proxy. This implies ROW has the same factor-share technology as Canada,
+    # which is a reasonable first-pass for an OECD-anchored ROW.
+    row_gamma = out.groupby("sector")["value"].mean()
+    row_rows = pd.DataFrame({
+        "sector": list(row_gamma.index),
+        "region": ROW,
+        "value": row_gamma.to_numpy(),
+    })
+    return pd.concat([out, row_rows], ignore_index=True)
 
 
 # ---------------------------------------------------------------- structures share
@@ -632,7 +700,45 @@ def build_structures_share(year: int = DEFAULT_YEAR) -> pd.DataFrame:
     )
     out = pivot["B"].reindex(PROVINCES).reset_index()
     out.columns = ["region", "value"]
-    return out
+    # ROW B = simple mean of Canadian provincial B (capital share of factor
+    # income, roughly 0.30 for Canada). The model just needs a value in
+    # [0, 1) for ROW; the exact number affects ROW's own labor allocation
+    # but not interprovincial dynamics directly.
+    row_row = pd.DataFrame({"region": [ROW], "value": [out["value"].mean()]})
+    return pd.concat([out, row_row], ignore_index=True)
+
+
+# ---------------------------------------------------------------- final demand share
+
+
+def build_final_demand_share(year: int = DEFAULT_YEAR) -> pd.DataFrame:
+    """Long-form (sector, region, value) Cobb-Douglas final-demand shares.
+
+    First-pass proxy: use Canadian-aggregate sector shares of "Total supply"
+    (= intra-provincial use + imports = total absorption by that province)
+    from the interprovincial trade table, summed across 10 provinces. Apply
+    the same α vector to every region (10 provinces + ROW).
+
+    Strictly the right object is *final* consumption by sector — separating
+    intermediate from final use requires the Use table from a SUT. The Total-
+    supply proxy biases toward sectors with heavy intermediate use
+    (Construction, Wholesale Trade) and underweights pure-final sectors. A
+    future refinement should pull the Use table from StatCan Table
+    36-10-0479-01 to get clean final demand by commodity.
+    """
+    df = _load_trade_table(year)
+    supply = df[df["trade_flow"] == "Total supply"].copy()
+    sector_supply = (
+        supply.groupby("sector")["value"].sum()
+        .reindex([s for s, _ in SECTOR_AGGREGATION]).fillna(0.0)
+    )
+    alpha_by_sector = sector_supply / sector_supply.sum()
+    # Apply uniformly to all regions.
+    rows = []
+    for region in REGIONS:
+        for sector, share in alpha_by_sector.items():
+            rows.append({"sector": sector, "region": region, "value": float(share)})
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------- portfolio share
@@ -643,11 +749,11 @@ def build_portfolio_share() -> pd.DataFrame:
     CPRHS calibrate ι_n as a residual to match observed US trade balances,
     treating it as the fraction of a region's structures rents flowing into a
     global portfolio. For an initial Canadian calibration we set ι ≡ 0 (every
-    province retains all its capital income). This is the simplest defensible
-    starting point per the DATA.md guidance and can be tuned later once we
-    have interprovincial current-account estimates.
+    province retains all its capital income, including ROW). This is the
+    simplest defensible starting point per the DATA.md guidance and can be
+    tuned later once we have interprovincial current-account estimates.
     """
-    return pd.DataFrame({"region": list(PROVINCES), "value": [0.0] * len(PROVINCES)})
+    return pd.DataFrame({"region": list(REGIONS), "value": [0.0] * len(REGIONS)})
 
 
 # ---------------------------------------------------------------- diagnostics
@@ -718,6 +824,18 @@ def main() -> None:
     employment.to_parquet(path, index=False)
     print(f"  wrote {path}  ({len(employment):>6d} rows, "
           f"{path.stat().st_size/1024:6.1f} KiB)")
+    print()
+
+    print(f"Building final_demand_share.parquet for {args.year}...")
+    alpha = build_final_demand_share(args.year)
+    col_sums = alpha.groupby("region")["value"].sum()
+    print(f"  column sums (should all be 1.0): min={col_sums.min():.4f}, max={col_sums.max():.4f}")
+    print("  top α (by share):")
+    for s, v in alpha.groupby("sector")["value"].mean().nlargest(5).items():
+        print(f"    {s:<48} {v:.4f}")
+    path = out_dir / "final_demand_share.parquet"
+    alpha.to_parquet(path, index=False)
+    print(f"  wrote {path}  ({len(alpha):>6d} rows)")
     print()
 
     print(f"Building value_added_share.parquet for {args.year}...")

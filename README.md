@@ -46,7 +46,7 @@ baseline = compute_baseline(raw=raw)
 
 # One regional shock: 10% TFP boost in California (state index 4, 0-indexed).
 ca = compute_regional_shock(region=4)
-elast = regional_elasticities(ca, region=4, Ln=raw.L_j_n.sum(0) / raw.L_j_n.sum())
+elast = regional_elasticities(ca, region=4, Ln=baseline.Ln)
 print(elast.TFP, elast.GDP, elast.welfare)
 
 # Full sweep of all 50 regional shocks + elasticities (~10 minutes).

@@ -452,7 +452,8 @@ def compute_regional_shock(
     Parameters
     ----------
     region : int (0-indexed)
-        State index, 0..49. MATLAB region 1 (Alabama) is Python region 0.
+        Region index, 0..N-1. For the CPRHS calibration: 0 = Alabama,
+        4 = California, etc. MATLAB region n is Python region n-1.
     baseline : BenchmarkResult or None
         If None, loads the MATLAB golden Base_Year_Benchmark.mat.
     shock : float
@@ -486,8 +487,9 @@ def compute_sectoral_shock(
     Parameters
     ----------
     sector : int (0-indexed)
-        Sector index, 0..25. MATLAB sector 11 (Computers and Electronics)
-        is Python sector 10.
+        Sector index, 0..J-1. For the CPRHS calibration: 10 = Computers
+        and Electronics, 19 = Finance and Insurance, etc. MATLAB sector n
+        is Python sector n-1.
     """
     if raw is None:
         raw = load_raw_inputs()
@@ -509,13 +511,13 @@ def regional_sweep(
     maxit: int = 1_000_000,
     verbose: bool = False,
 ) -> RegionalSweepResult:
-    """Sweep a 10% TFP shock over all 50 US states and return aggregate elasticities.
+    """Sweep a 10% TFP shock over every region and return aggregate elasticities.
 
     Mirrors a full pass of Regional_shocks_Benchmark.m followed by
     Aggregate_elasticities_regional_shocks.m. Calibration and the xbilat-derived
-    state are built once and reused across the 50 shocks.
+    state are built once and reused across the N shocks.
 
-    Wall-clock: ~10 minutes on a laptop (each shock ~10s at tol=1e-12).
+    Wall-clock for CPRHS (N=50, tol=1e-12): ~10 minutes; each shock ~10s.
     """
     if raw is None:
         raw = load_raw_inputs()
@@ -557,13 +559,13 @@ def sectoral_sweep(
     maxit: int = 1_000_000,
     verbose: bool = False,
 ) -> SectoralSweepResult:
-    """Sweep a 10% TFP shock over all 26 sectors and return aggregate elasticities.
+    """Sweep a 10% TFP shock over every sector and return aggregate elasticities.
 
     Mirrors a full pass of Sectoral_shocks_Benchmark.m followed by
     Aggregate_elasticities_sectoral_shocks.m. Welfare uses baseline `Ljn` for
-    the denominator (sum over states gives sector employment share).
+    the denominator (sum over regions gives sector employment share).
 
-    Wall-clock: ~2-3 minutes on a laptop (each shock ~5s at MATLAB tol=1e-8).
+    Wall-clock for CPRHS (J=26, tol=1e-8): ~2-3 minutes; each shock ~5s.
     """
     if raw is None:
         raw = load_raw_inputs()

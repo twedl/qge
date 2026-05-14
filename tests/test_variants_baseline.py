@@ -27,7 +27,9 @@ def ns_baseline():
 
 @pytest.fixture(scope="module")
 def nr_baseline():
-    return compute_baseline_nr()
+    from qge.io import load_inputs
+    raw = load_inputs()
+    return compute_baseline_nr(raw=raw, tradable=list(raw.sectors[:15]))
 
 
 @pytest.fixture(scope="module")

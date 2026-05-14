@@ -136,9 +136,9 @@ def compute_baseline_ns(
 
 def compute_baseline_nr(
     *,
+    tradable: list[str],
     raw: Optional[RawInputs] = None,
     benchmark: Optional[BenchmarkResult] = None,
-    tradable: Optional[list[str]] = None,
     tol: float = 1e-12,
     vfactor: float = -0.1,
     maxit: int = 1_000_000,
@@ -152,10 +152,10 @@ def compute_baseline_nr(
 
     Parameters
     ----------
-    tradable : list of sector names, optional
-        Sectors whose interstate trade is shut off. If None, defaults to the
-        first 15 sectors (CPRHS convention — pass the list explicitly when
-        the sector ordering of your calibration is not paper-faithful).
+    tradable : list of sector names
+        Sectors whose interstate trade is shut off. Required (no default) so
+        the tradable/non-tradable split is always an explicit choice. For
+        CPRHS: pass ``raw.sectors[:15]`` (paper's first-15 convention).
     """
     if raw is None:
         raw = load_raw_inputs()
@@ -181,8 +181,6 @@ def compute_baseline_nr(
     )
     cal_nr = replace(cal, io=np.zeros_like(cal.io))
 
-    if tradable is None:
-        tradable = list(raw.sectors[:15])
     unknown = [s for s in tradable if s not in raw.sectors]
     if unknown:
         raise ValueError(f"unknown tradable sector(s): {unknown}")

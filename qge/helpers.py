@@ -331,9 +331,16 @@ def neweq(
     VAL_out = (1 - b) * (TD + aux2.sum(axis=0))  # (N,)
     VAR_out = (b / (1 - b)) * VAL_out  # (N,)
 
-    # New Ljn using new exports E (== Exjn in MATLAB)
+    # New Ljn using new exports E (== Exjn in MATLAB). When VALjn0 = 0 (e.g.
+    # a region with no production in that sector), the ratio is 0/0; set the
+    # cell to 0 explicitly since "no pre-shock production" → "no post-shock
+    # employment" rather than NaN.
     aux_w = wf0[None, :]
-    Ljn_hat = (1.0 / (VALjn0 * aux_w)) * gamma * (1 - B) * E  # (J, N)
+    denom = VALjn0 * aux_w
+    Ljn_hat = np.divide(
+        gamma * (1 - B) * E, denom,
+        out=np.zeros_like(denom), where=(denom > 0),
+    )
     Ljn_norm = L_j_n / L_j_n.sum()
     Ljn_out = Ljn_hat * Ljn_norm
     Ln_out = L_hat * Ln  # MATLAB overwrites the nansum-based value; we skip the dead line

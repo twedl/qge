@@ -55,6 +55,31 @@ def test_validate_rejects_wrong_shape(raw):
         _validate(replace(raw, L_j_n=truncated))
 
 
+def test_handles_zero_production_cells(raw):
+    """A (sector, region) cell with truly zero gross output should produce
+    Ljn = 0 (not NaN), and aggregate quantities should be finite.
+
+    This case doesn't arise in CPRHS data (every cell has positive output
+    via measurement quirks) but is expected for Canadian data — e.g. PEI
+    has no petroleum production.
+    """
+    from qge.models.benchmark import compute_baseline, compute_regional_shock
+
+    sec, reg = 4, 10  # Petroleum and Coal, Hawaii — a CPRHS-positive cell we'll zero out
+    J = len(raw.sectors)
+    xbilat_3d = raw.xbilat.reshape(J, raw.N, raw.N).copy()
+    xbilat_3d[sec, :, reg] = 0.0  # the source state produces nothing in this sector
+    raw_zero = replace(raw, xbilat=xbilat_3d.reshape(J * raw.N, raw.N))
+
+    baseline = compute_baseline(raw=raw_zero, tol=1e-10)
+    assert baseline.Ljn[sec, reg] == 0.0
+    assert not np.isnan(baseline.Ljn).any()
+
+    shock = compute_regional_shock(region=4, raw=raw_zero, baseline=baseline, tol=1e-10)
+    assert not np.isnan(shock.Ljn_hat).any()
+    assert np.isfinite(shock.TFP_hat) and np.isfinite(shock.GDP_hat)
+
+
 def test_benchmark_golden_loads(benchmark_golden):
     """Smoke-test: the Benchmark golden state has the variables we need."""
     expected = {

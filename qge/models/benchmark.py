@@ -350,8 +350,14 @@ def _post_shock_accounting(
 
 def _baseline_quantities(
     baseline: Optional[BenchmarkResult],
+    raw: RawInputs,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (xbilat, Ln, Ljn) from a user-provided baseline or the MATLAB golden state."""
+    """Return (xbilat, Ln, Ljn) for use as the pre-shock state.
+
+    Resolution order: an explicit `baseline`, then the CPRHS MATLAB golden
+    when its shape matches `raw` (fast path for the CPRHS calibration),
+    then a freshly computed baseline from `raw` for any other calibration.
+    """
     if baseline is not None:
         return (
             baseline.xbilat,
@@ -359,7 +365,10 @@ def _baseline_quantities(
             np.asarray(baseline.Ljn),
         )
     gold = load_base_year("Benchmark")
-    return gold["xbilat_RS"], gold["Ln_RS"].ravel(), gold["Ljn_RS"]
+    if gold["xbilat_RS"].shape == raw.xbilat.shape:
+        return gold["xbilat_RS"], gold["Ln_RS"].ravel(), gold["Ljn_RS"]
+    fresh = compute_baseline(raw=raw)
+    return fresh.xbilat, np.asarray(fresh.Ln).ravel(), np.asarray(fresh.Ljn)
 
 
 # ---------------------------------------------------------------- public API
@@ -423,7 +432,7 @@ def _run_shock(
     if raw is None:
         raw = load_raw_inputs()
     cal = _build_calibration(raw)
-    xbilat, Ln, _ = _baseline_quantities(baseline)
+    xbilat, Ln, _ = _baseline_quantities(baseline, raw)
     state = _derive_from_xbilat(xbilat, Ln, cal)
     if kappa_hat is None:
         kappa_hat = np.ones((cal.J * cal.N, cal.N))
@@ -522,7 +531,7 @@ def regional_sweep(
     if raw is None:
         raw = load_raw_inputs()
     cal = _build_calibration(raw)
-    xbilat, Ln, _ = _baseline_quantities(baseline)
+    xbilat, Ln, _ = _baseline_quantities(baseline, raw)
     state = _derive_from_xbilat(xbilat, Ln, cal)
     kappa_hat = np.ones((cal.J * cal.N, cal.N))
 
@@ -570,7 +579,7 @@ def sectoral_sweep(
     if raw is None:
         raw = load_raw_inputs()
     cal = _build_calibration(raw)
-    xbilat, Ln, Ljn = _baseline_quantities(baseline)
+    xbilat, Ln, Ljn = _baseline_quantities(baseline, raw)
     state = _derive_from_xbilat(xbilat, Ln, cal)
     kappa_hat = np.ones((cal.J * cal.N, cal.N))
 

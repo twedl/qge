@@ -251,9 +251,9 @@ def _derive_from_xbilat(xbilat: np.ndarray, Ln: np.ndarray, cal: _Calibration) -
     VALjn0 = cal.gamma * (1 - cal.B) * Exjn0
 
     aux2 = X0 - np.einsum("njk,kn->jn", cal.G_3d, E)
-    b1 = cal.B[0, :]
-    VAL = (1 - b1) * (Bn + aux2.sum(axis=0))
-    VAR = (b1 / (1 - b1)) * VAL
+    b = cal.B
+    VAL = (1 - b) * (Bn + aux2.sum(axis=0))
+    VAR = (b / (1 - b)) * VAL
 
     Chin = float(np.sum(cal.io * VAR)) * Ln
     Sn = Bn - cal.io * VAR + Chin
@@ -320,8 +320,8 @@ def _post_shock_accounting(
     loop: _LoopState, state: _XbilatState, cal: _Calibration,
 ) -> BenchmarkShockResult:
     J, N = cal.J, cal.N
-    b1 = cal.B[0, :]
-    wf0 = loop.om * (loop.L_hat ** (-b1))
+    b = cal.B
+    wf0 = loop.om * (loop.L_hat ** (-b))
 
     Exjn = _exports_by_source(loop.Dinp, loop.Xp, J, N)
     Exjn0 = state.Exjn0
@@ -394,7 +394,7 @@ def compute_baseline(
     # Implied initial sector-state employment for neweq.
     w0 = state.VAL / Ln
     Ljn0 = state.VALjn0 / w0[None, :]
-    wf0 = loop.om * (loop.L_hat ** (-cal.B[0, :]))
+    wf0 = loop.om * (loop.L_hat ** (-cal.B))
 
     out = neweq(
         cal.J, cal.N, loop.Xp, loop.Dinp, cal.G, cal.B, cal.gamma,

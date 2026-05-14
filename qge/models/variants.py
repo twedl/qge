@@ -54,30 +54,32 @@ def _zero_bn_val_var(state: _XbilatState, cal: _Calibration) -> tuple[np.ndarray
     """Recompute (VAL, VAR) under Bn=0 by subtracting the Bn contribution.
 
     The MATLAB NR/NRNS scripts zero out the trade-deficit term before
-    computing VAL — equivalently, VAL_new = VAL - (1-b1)*Bn.
+    computing VAL — equivalently, VAL_new = VAL - (1-b)*Bn.
     """
-    b1 = cal.B[0, :]
-    VAL = state.VAL - (1 - b1) * state.Bn
-    VAR = (b1 / (1 - b1)) * VAL
+    b = cal.B
+    VAL = state.VAL - (1 - b) * state.Bn
+    VAR = (b / (1 - b)) * VAL
     return VAL, VAR
 
 
-def _no_trade_kappa(J: int, N: int, JT: int = 15) -> np.ndarray:
-    """`kappa_hat` that shuts off interstate trade for the first JT sectors.
+def _no_trade_kappa(tradable_idx, J: int, N: int) -> np.ndarray:
+    """`kappa_hat` that shuts off interstate trade for the given tradable sectors.
 
-    Tradable sectors get an identity-with-∞-off-diagonal block; non-tradable
-    sectors get all-1s (CPRHS convention).
+    Each tradable sector gets an identity-with-∞-off-diagonal block (only
+    intra-state trade allowed); all other sectors keep kappa = 1 (no shock).
+    The set of tradable sectors is supplied explicitly by index, dropping the
+    CPRHS "first-15" convention.
     """
-    diag = np.eye(N)
-    kappa_T = np.tile(diag, (JT, 1))  # (JT*N, N)
-    kappa_T[kappa_T == 0] = np.inf
-    kappa_NT = np.ones((max(J - JT, 0) * N, N))
-    return np.vstack([kappa_T, kappa_NT])
+    kappa = np.ones((J, N, N))
+    if len(tradable_idx) > 0:
+        diag_inf = np.where(np.eye(N) == 1, 1.0, np.inf)
+        kappa[list(tradable_idx)] = diag_inf
+    return kappa.reshape(J * N, N)
 
 
 def _build_benchmark_result(loop, state, cal, Ljn_for_neweq, Ln) -> BenchmarkResult:
     """Common neweq postprocessing → BenchmarkResult."""
-    wf0 = loop.om * (loop.L_hat ** (-cal.B[0, :]))
+    wf0 = loop.om * (loop.L_hat ** (-cal.B))
     out = neweq(
         cal.J, cal.N, loop.Xp, loop.Dinp, cal.G, cal.B, cal.gamma,
         Ljn_for_neweq, wf0, state.VALjn0, cal.io, loop.L_hat, Ln,
@@ -136,7 +138,7 @@ def compute_baseline_nr(
     *,
     raw: Optional[RawInputs] = None,
     benchmark: Optional[BenchmarkResult] = None,
-    tradable_sectors: int = 15,
+    tradable: Optional[list[str]] = None,
     tol: float = 1e-12,
     vfactor: float = -0.1,
     maxit: int = 1_000_000,
@@ -144,9 +146,16 @@ def compute_baseline_nr(
 ) -> BenchmarkResult:
     """No-regional-trade baseline (CPRHS_NR.m).
 
-    `kappa_hat` is set to identity-with-∞-off-diagonal for the first
-    `tradable_sectors` sectors (CPRHS: first 15). Trade deficits, portfolio
-    income, and `Sn` are zeroed; `LnIn = VAL + VAR`.
+    Interstate trade is shut off for the sectors named in ``tradable``
+    (kappa_hat → ∞ off-diagonal); non-tradable sectors are unchanged.
+    Trade deficits, portfolio income, and `Sn` are zeroed; `LnIn = VAL + VAR`.
+
+    Parameters
+    ----------
+    tradable : list of sector names, optional
+        Sectors whose interstate trade is shut off. If None, defaults to the
+        first 15 sectors (CPRHS convention — pass the list explicitly when
+        the sector ordering of your calibration is not paper-faithful).
     """
     if raw is None:
         raw = load_raw_inputs()
@@ -172,7 +181,13 @@ def compute_baseline_nr(
     )
     cal_nr = replace(cal, io=np.zeros_like(cal.io))
 
-    kappa_hat = _no_trade_kappa(cal.J, cal.N, JT=tradable_sectors)
+    if tradable is None:
+        tradable = list(raw.sectors[:15])
+    unknown = [s for s in tradable if s not in raw.sectors]
+    if unknown:
+        raise ValueError(f"unknown tradable sector(s): {unknown}")
+    tradable_idx = [raw.sectors.index(s) for s in tradable]
+    kappa_hat = _no_trade_kappa(tradable_idx, cal.J, cal.N)
     lambda_hat = np.ones((cal.J, cal.N))
     loop = _run_outer_loop(
         state, cal_nr, kappa_hat, lambda_hat, Snp=0.0,

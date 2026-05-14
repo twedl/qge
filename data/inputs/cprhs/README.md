@@ -23,7 +23,7 @@ hold human-readable sector and region names.
 | `employment.parquet`          | `sector, region, value`                  |  1300 |
 | `io_matrix.parquet`           | `source_sector, dest_sector, value`      |   676 |
 | `value_added_share.parquet`   | `sector, region, value` (γ)              |  1300 |
-| `structures_share.parquet`    | `sector, region, value` (B)              |  1300 |
+| `structures_share.parquet`    | `region, value` (B; per-state)           |    50 |
 | `final_demand_share.parquet`  | `sector, region, value` (α)              |  1300 |
 | `portfolio_share.parquet`     | `region, value` (ι)                      |    50 |
 | `sectoral_dispersion.parquet` | `sector, value` (1/θ)                    |    26 |

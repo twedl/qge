@@ -128,25 +128,25 @@ def Lchange(
     Snp_arr = np.asarray(Snp, dtype=float).reshape(-1) if np.ndim(Snp) else float(Snp)
 
     phi_n = LnIn / (LnIn + Bn_arr)
-    b1 = B[0, :]
+    b = B
     P_index_hat = np.prod(phat ** alphas, axis=0)  # (N,)
     # Matches `if Bn == 0; Bn = 1` in MATLAB: a sentinel for autarky-like cases
     Bn_eff = 1.0 if np.all(Bn_arr == 0) else Bn_arr
     H_arr = 1.0 if H_hat is None else np.asarray(H_hat, dtype=float).reshape(-1)
-    H_b1 = H_arr ** b1  # broadcasts to (N,) when H_arr is scalar 1.0
+    H_b = H_arr ** b  # broadcasts to (N,) when H_arr is scalar 1.0
 
     Lmax = np.inf
     V_hat = 0.0
     it = 0
     while it < maxit and Lmax > tol:
-        VARp = VAR * om * H_b1 * (L_hat ** (1 - b1))
+        VARp = VAR * om * H_b * (L_hat ** (1 - b))
         Chip = float(np.sum(io * VARp))
         Chinp = Ln * L_hat * Chip
         Bnp = Snp_arr - Chinp + io * VARp
         omreal = om / P_index_hat
 
         V_hat = float(np.sum(
-            (Ln / phi_n) * omreal * H_b1 * (L_hat ** (1 - b1))
+            (Ln / phi_n) * omreal * H_b * (L_hat ** (1 - b))
             - Ln * ((1 - phi_n) / phi_n) * (Bnp / Bn_eff) / P_index_hat
         ))
 
@@ -156,7 +156,7 @@ def Lchange(
                 phi_n * (P_index_hat * V_hat)
                 + (1 - phi_n) * ((Bnp / Bn_eff) / L_hat)
             )
-        ) ** (1.0 / b1)
+        ) ** (1.0 / b)
         den = float(np.sum(Ln * num))
         L_hat1 = num / den
 
@@ -191,10 +191,10 @@ def expenditure(
     VAL = np.asarray(VAL).reshape(-1)
     io = np.asarray(io).reshape(-1)
     Snp_arr = np.asarray(Snp, dtype=float) if np.ndim(Snp) else float(Snp)
-    b1 = B[0, :]
-    H_b1 = 1.0 if H_hat is None else np.asarray(H_hat, dtype=float).reshape(-1) ** b1
+    b = B
+    H_b = 1.0 if H_hat is None else np.asarray(H_hat, dtype=float).reshape(-1) ** b
 
-    VARp = VAR * om * H_b1 * (L_hat ** (1 - b1))
+    VARp = VAR * om * H_b * (L_hat ** (1 - b))
     Chip = float(np.sum(io * VARp))
     Chinp = Ln * L_hat * Chip
     Bnp = Snp_arr - Chinp + io * VARp  # (N,)
@@ -207,7 +207,7 @@ def expenditure(
     GP = GG * NNBP
     OM = np.eye(J * N) - GP
 
-    aux = om * H_b1 * (L_hat ** (1 - b1)) * (VAR + VAL) - Bnp  # (N,)
+    aux = om * H_b * (L_hat ** (1 - b)) * (VAR + VAL) - Bnp  # (N,)
     aux2 = np.repeat(aux, J)  # (N*J,)
     alphas_flat = alphas.ravel(order="F")  # MATLAB column-major: (N*J,)
     rhs = alphas_flat * aux2
@@ -232,12 +232,12 @@ def GMC(
     L_hat = np.asarray(L_hat).reshape(-1)
     VAR = np.asarray(VAR).reshape(-1)
     VAL = np.asarray(VAL).reshape(-1)
-    b1 = B[0, :]
-    H_b1 = 1.0 if H_hat is None else np.asarray(H_hat, dtype=float).reshape(-1) ** b1
+    b = B
+    H_b = 1.0 if H_hat is None else np.asarray(H_hat, dtype=float).reshape(-1) ** b
 
     DDDinpt = _exports_by_source(Dinp, Xp, J, N)  # (J, N)
     aux5 = np.sum(gamma * DDDinpt, axis=0)  # (N,)
-    return aux5 / (H_b1 * (L_hat ** (1 - b1)) * (VAR + VAL))
+    return aux5 / (H_b * (L_hat ** (1 - b)) * (VAR + VAL))
 
 
 def GOTFP(
@@ -314,7 +314,7 @@ def neweq(
     L_hat = np.asarray(L_hat).reshape(-1)
     Ln = np.asarray(Ln).reshape(-1)
     io = np.asarray(io).reshape(-1)
-    b1 = B[0, :]
+    b = B
 
     PQ_vec = Xp.reshape(-1)  # (J*N,)
     xbilat_new = Dinp * PQ_vec[:, None]  # (J*N, N)
@@ -328,8 +328,8 @@ def neweq(
     G_3d = G.reshape(N, J, J)
     # aux2[:, n] = X0[:, n] - G_3d[n] @ E[:, n]
     aux2 = X0 - np.einsum("njk,kn->jn", G_3d, E)
-    VAL_out = (1 - b1) * (TD + aux2.sum(axis=0))  # (N,)
-    VAR_out = (b1 / (1 - b1)) * VAL_out  # (N,)
+    VAL_out = (1 - b) * (TD + aux2.sum(axis=0))  # (N,)
+    VAR_out = (b / (1 - b)) * VAL_out  # (N,)
 
     # New Ljn using new exports E (== Exjn in MATLAB)
     aux_w = wf0[None, :]

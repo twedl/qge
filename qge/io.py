@@ -53,7 +53,8 @@ class RawInputs:
     IO      : (J, J)       input-output coefficients (rows = source sector,
                             columns = destination sector)
     gamma   : (J, N)       value-added share in gross output
-    B       : (J, N)       structures share in value added
+    B       : (N,)         structures share in value added (assumed
+                            constant across sectors within a region)
     alphas  : (J, N)       final-demand shares (columns sum to 1)
     io      : (N,)         fraction of structure rents to global portfolio
     """
@@ -195,7 +196,7 @@ def load_inputs(directory: Path | str = DEFAULT_CALIBRATION) -> RawInputs:
         employment.parquet           (sector, region, value)
         io_matrix.parquet            (source_sector, dest_sector, value)
         value_added_share.parquet    (sector, region, value)   # γ
-        structures_share.parquet     (sector, region, value)   # B
+        structures_share.parquet     (region, value)           # B (per-state)
         final_demand_share.parquet   (sector, region, value)   # α
         portfolio_share.parquet      (region, value)           # ι
         sectoral_dispersion.parquet  (sector, value)           # 1/θ
@@ -225,7 +226,7 @@ def load_inputs(directory: Path | str = DEFAULT_CALIBRATION) -> RawInputs:
 
     L_j_n  = _load("employment.parquet",          "sector", "region")
     gamma  = _load("value_added_share.parquet",   "sector", "region")
-    B      = _load("structures_share.parquet",    "sector", "region")
+    B      = _load("structures_share.parquet",    "region").ravel()
     alphas = _load("final_demand_share.parquet",  "sector", "region")
     IO     = _load("io_matrix.parquet",           "source_sector", "dest_sector")
     xbilat = _load("bilateral_trade.parquet",     "sector", "destination", "source") \
@@ -243,11 +244,29 @@ def load_inputs(directory: Path | str = DEFAULT_CALIBRATION) -> RawInputs:
 
 
 def _validate(raw: RawInputs) -> None:
-    """Range and finite-ness checks. Raises ValueError on failure."""
-    for name in ("xbilat", "L_j_n", "IO", "gamma", "B", "alphas", "io", "T"):
+    """Shape, range, and consistency checks. Raises ValueError on failure.
+
+    Catches likely real-world data issues that would otherwise produce silent
+    NaN / wrong-answer behavior inside the solver.
+    """
+    J, N = raw.J, raw.N
+    expected_shapes = {
+        "xbilat": (J * N, N),
+        "L_j_n":  (J, N),
+        "IO":     (J, J),
+        "gamma":  (J, N),
+        "B":      (N,),
+        "alphas": (J, N),
+        "io":     (N,),
+        "T":      (J,),
+    }
+    for name, want in expected_shapes.items():
         arr = getattr(raw, name)
+        if arr.shape != want:
+            raise ValueError(f"{name!r} has shape {arr.shape}, expected {want}")
         if not np.isfinite(arr).all():
             raise ValueError(f"{name!r} contains non-finite values")
+    # Sign / range constraints.
     if (raw.xbilat < 0).any():
         raise ValueError("xbilat has negative entries")
     if (raw.L_j_n < 0).any():
@@ -262,6 +281,50 @@ def _validate(raw: RawInputs) -> None:
         raise ValueError("io out of [0, 1]")
     if (raw.T <= 0).any():
         raise ValueError("T (sectoral dispersion) must be strictly positive")
+    # Consistency constraints — would silently break the solver.
+    alpha_col_sums = raw.alphas.sum(axis=0)
+    if not np.allclose(alpha_col_sums, 1.0, atol=1e-6):
+        worst = int(np.argmax(np.abs(alpha_col_sums - 1)))
+        raise ValueError(
+            f"alphas column for region index {worst} sums to "
+            f"{alpha_col_sums[worst]:.4f}; expected 1.0 (final-demand shares)"
+        )
+    if (raw.xbilat.sum(axis=1) == 0).any():
+        zero_rows = int(np.flatnonzero(raw.xbilat.sum(axis=1) == 0)[0])
+        raise ValueError(
+            f"xbilat row {zero_rows} sums to 0 (no expenditure for that "
+            f"sector × destination); the trade-share denominator would divide by zero"
+        )
+    if (raw.IO.sum(axis=0) == 0).any():
+        zero_cols = int(np.flatnonzero(raw.IO.sum(axis=0) == 0)[0])
+        raise ValueError(
+            f"IO column {zero_cols} sums to 0 (destination sector has no "
+            f"intermediate inputs); IO column-normalization would divide by zero"
+        )
+
+
+def _collapse_to_region_vector(
+    arr: np.ndarray, *, name: str, atol: float = 1e-6,
+) -> np.ndarray:
+    """Reduce a (J, N) array assumed constant across sectors to (N,).
+
+    Raises ValueError if rows differ by more than `atol` — the model assumes
+    the quantity is sector-invariant within a region, and silently averaging
+    sector-varying data would obscure a calibration bug.
+    """
+    if arr.ndim == 1:
+        return arr
+    if arr.shape[0] == 1:
+        return arr[0, :]
+    max_diff = np.max(np.abs(arr - arr[0:1, :]), axis=0)
+    if (max_diff > atol).any():
+        worst = int(np.argmax(max_diff))
+        raise ValueError(
+            f"{name!r} varies across sectors in region index {worst} "
+            f"(max diff {max_diff[worst]:.3e}); the model assumes "
+            f"sector-invariant — aggregate externally before loading."
+        )
+    return arr[0, :]
 
 
 def _load_var(path: Path, var: str) -> np.ndarray:
@@ -282,7 +345,9 @@ def load_raw_inputs_from_mat(data_dir: Path = DATA_DIR) -> RawInputs:
     # (CPRHS_Benchmark.m line 40 renames it on load).
     L_j_n = _load_var(data_dir / "L_j_n.mat", "L_j_n_with_construction")
     gamma = _load_var(data_dir / "gamma.mat", "gamma")
-    B = _load_var(data_dir / "B.mat", "B")
+    # B in the .mat file is (J, N) with rows identical (CPRHS data has structures
+    # share constant across sectors within a state). The model uses (N,).
+    B = _collapse_to_region_vector(_load_var(data_dir / "B.mat", "B"), name="B")
     alphas = _load_var(data_dir / "alphas.mat", "alphas")
     io = _load_var(data_dir / "io.mat", "io").reshape(-1)
     IO = np.loadtxt(data_dir / "IO_table.txt")

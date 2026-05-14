@@ -708,6 +708,104 @@ def build_structures_share(year: int = DEFAULT_YEAR) -> pd.DataFrame:
     return pd.concat([out, row_row], ignore_index=True)
 
 
+# ---------------------------------------------------------------- IO matrix
+
+# Each CPRHS sector (ordered by index 0..25) maps to one Canadian sector. Two
+# or three CPRHS sectors can fold into a single broader Canadian one. Canadian
+# sectors NOT covered (Agriculture, Mining, Utilities, Professional/Admin) are
+# absent from CPRHS — for those we fill the IO row/column with the average of
+# the covered sectors so they aren't structurally degenerate.
+_CPRHS_TO_CANADIAN_SECTOR = {
+    "Food, Beverage, Tobacco":          "Food, Beverage, Tobacco",
+    "Textile, Apparel, Leather":        "Textile, Apparel, Leather",
+    "Wood and Paper":                   "Wood, Paper, Printing",
+    "Printing":                         "Wood, Paper, Printing",
+    "Petroleum and Coal":               "Petroleum and Chemicals",
+    "Chemicals":                        "Petroleum and Chemicals",
+    "Plastics and Rubber":              "Petroleum and Chemicals",
+    "Nonmetallic Mineral":              "Non-metallic Mineral Products",
+    "Primary and Fabricated Metal":     "Metals and Machinery",
+    "Machinery":                        "Metals and Machinery",
+    "Computer and Electronics":         "Computers, Electronics, Electrical",
+    "Electrical Equipment":             "Computers, Electronics, Electrical",
+    "Transportation Equipment":         "Transportation Equipment",
+    "Furniture":                        "Furniture and Other Manufacturing",
+    "Miscellaneous":                    "Furniture and Other Manufacturing",
+    "Construction":                     "Construction",
+    "Wholesale and Retail Trade":       "Wholesale and Retail Trade",
+    "Transport Services":               "Transportation Services",
+    "Information Services":             "Information and Communication",
+    "Finance and Insurance":            "Finance and Insurance",
+    "Real Estate":                      "Real Estate, Rental, Leasing",
+    "Education":                        "Education",
+    "Health Care":                      "Health",
+    "Arts and Recreation":              "Arts, Recreation, Accommodation, Food",
+    "Accom. and Food Services":         "Arts, Recreation, Accommodation, Food",
+    "Other Services":                   "Public Administration and Other Services",
+}
+
+
+def build_io_matrix() -> pd.DataFrame:
+    """Long-form (source_sector, dest_sector, value) IO matrix for the 23 sectors.
+
+    First-pass: aggregates the CPRHS US input-output coefficients onto our
+    23 Canadian sectors (sum across CPRHS sectors that map to the same
+    Canadian one). Canadian sectors with no CPRHS analog (Agriculture &
+    Forestry & Fishing, Mining and Extraction, Utilities, Professional and
+    Administrative Services) receive row/column values from the average of
+    the covered sectors so they have a plausible "average sector" input mix.
+
+    The model column-normalizes internally; absolute scale doesn't matter.
+    A future refinement should derive Canadian-specific IO coefficients
+    from StatCan Supply-Use Tables (36-10-0479-01).
+    """
+    import numpy as np
+    from qge.io import DEFAULT_CALIBRATION, _CPRHS_SECTORS
+
+    cprhs_io = (
+        pd.read_parquet(DEFAULT_CALIBRATION / "io_matrix.parquet")
+        .pivot(index="source_sector", columns="dest_sector", values="value")
+        .reindex(index=_CPRHS_SECTORS, columns=_CPRHS_SECTORS)
+        .fillna(0.0)
+        .to_numpy()
+    )
+
+    canadian_sectors = [s for s, _ in SECTOR_AGGREGATION]
+    n = len(canadian_sectors)
+    sec_idx = {s: i for i, s in enumerate(canadian_sectors)}
+    cprhs_idx_to_can = [
+        sec_idx[_CPRHS_TO_CANADIAN_SECTOR[s]] for s in _CPRHS_SECTORS
+    ]
+
+    can_io = np.zeros((n, n))
+    for i in range(len(_CPRHS_SECTORS)):
+        for j in range(len(_CPRHS_SECTORS)):
+            can_io[cprhs_idx_to_can[i], cprhs_idx_to_can[j]] += cprhs_io[i, j]
+
+    # Identify Canadian sectors covered vs missing.
+    covered = set(_CPRHS_TO_CANADIAN_SECTOR.values())
+    missing = [s for s in canadian_sectors if s not in covered]
+    covered_idx = [sec_idx[s] for s in canadian_sectors if s in covered]
+
+    # Fill missing rows with column averages of present rows;
+    # fill missing columns with row averages of present columns.
+    for s in missing:
+        j = sec_idx[s]
+        can_io[j, :] = can_io[covered_idx, :].mean(axis=0)
+        can_io[:, j] = can_io[:, covered_idx].mean(axis=1)
+    for s in missing:
+        j = sec_idx[s]
+        # diagonal: average of present-sector diagonals
+        can_io[j, j] = can_io[covered_idx, covered_idx].mean()
+
+    rows = []
+    for i, src in enumerate(canadian_sectors):
+        for j, dst in enumerate(canadian_sectors):
+            rows.append({"source_sector": src, "dest_sector": dst,
+                         "value": float(can_io[i, j])})
+    return pd.DataFrame(rows)
+
+
 # ---------------------------------------------------------------- final demand share
 
 
@@ -873,6 +971,16 @@ def main() -> None:
     path = out_dir / "portfolio_share.parquet"
     iota.to_parquet(path, index=False)
     print(f"  wrote {path}  ({len(iota):>6d} rows, "
+          f"{path.stat().st_size/1024:6.1f} KiB)")
+    print()
+
+    print("Building io_matrix.parquet (CPRHS US IO aggregated to 23 Canadian sectors)...")
+    io = build_io_matrix()
+    print(f"  IO range: min={io['value'].min():.4f}, "
+          f"max={io['value'].max():.4f}, mean={io['value'].mean():.4f}")
+    path = out_dir / "io_matrix.parquet"
+    io.to_parquet(path, index=False)
+    print(f"  wrote {path}  ({len(io):>6d} rows, "
           f"{path.stat().st_size/1024:6.1f} KiB)")
 
 

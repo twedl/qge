@@ -1,19 +1,22 @@
 # qge
 
-A Python port of the Caliendo, Parro, Rossi-Hansberg, and Sarte (CPRHS) quantitative general-equilibrium model of the US economy — *The Impact of Regional and Sectoral Productivity Changes in the U.S. Economy*. Translates the paper's MATLAB replication kit into idiomatic NumPy/SciPy and ships the inputs as labeled long-form parquet so the model can be driven by data outside the original calibration.
+A Python port of the Caliendo, Parro, Rossi-Hansberg, and Sarte (CPRHS) quantitative general-equilibrium model — *The Impact of Regional and Sectoral Productivity Changes in the U.S. Economy*. Translates the paper's MATLAB replication kit into idiomatic NumPy/SciPy, ships the inputs as labeled long-form parquet, and exposes results as pandas DataFrames indexed by sector and region names. The core solver is calibration-agnostic — designed for swap-in of Canadian (or any other) data.
 
 ## Status
 
-The Benchmark variant of the model is fully ported:
+Ported and verified against the MATLAB workspaces to machine epsilon (relative error 1e-13 to 1e-16):
 
-- Baseline equilibrium from raw 2007 data.
-- Regional counterfactuals: 10% TFP shock in each of 50 states.
-- Sectoral counterfactuals: 10% TFP shock in each of 26 sectors.
-- Aggregate TFP / GDP / welfare elasticities.
+- **Benchmark baseline** — 2007 US equilibrium from raw data.
+- **Counterfactuals** — regional (50-state) and sectoral (26-sector) 10% TFP shocks.
+- **Aggregate elasticities** — TFP, GDP, welfare per shock, plus full sweeps.
+- **Applications** — California computers boom, North Dakota oil boom, NYC FIRE contraction, Hurricane Katrina (structures shock).
+- **Model variants** — NS (no sectoral linkages), NR (no regional trade), NRNS (both) baselines.
+- **Geographic-barriers** counterfactuals — distance and other-barriers scenarios.
+- **Reporting layer** — `.regional_summary()`, `.sectoral_summary()`, `.as_dataframe()` on every result type; outputs are pandas DataFrames indexed by sector / region names.
 
-All outputs match the published MATLAB workspaces to machine epsilon (relative error around 1e-13 to 1e-16) on the values the paper reports. **22 tests pass in ~40 seconds.**
+**43 tests pass in ~100 seconds.**
 
-Not yet implemented: the NS / NR / NRNS / Efficient model variants, the four real-economy applications (California computers, North Dakota oil, NYC FIRE, Hurricane Katrina), and the geographic-barriers counterfactuals. The translation machinery is in place for all of them.
+Not yet ported: the variant shock scripts (Regional_shocks_NS, Sectoral_shocks_NR, Regional_shocks_NRNS — they use `P_h_omNI`) and the Efficient (planner's allocation) model. The translation machinery is in place for both.
 
 ## Install
 
@@ -34,50 +37,64 @@ from qge.io import load_inputs
 from qge.models.benchmark import (
     compute_baseline,
     compute_regional_shock,
-    compute_sectoral_shock,
     regional_sweep,
-    sectoral_sweep,
 )
-from qge.elasticities import regional_elasticities, sectoral_elasticities
+from qge.applications import shock_california_computers
+from qge.elasticities import regional_elasticities
 
 # Baseline equilibrium from the shipped CPRHS calibration (~10 seconds).
 raw = load_inputs()                      # data/inputs/cprhs/
 baseline = compute_baseline(raw=raw)
 
-# One regional shock: 10% TFP boost in California (state index 4, 0-indexed).
-ca = compute_regional_shock(region=4)
+# One regional shock: 10% TFP boost in California.
+ca = compute_regional_shock(region=4, raw=raw)
 elast = regional_elasticities(ca, region=4, Ln=baseline.Ln)
-print(elast.TFP, elast.GDP, elast.welfare)
+print(f"California — TFP {elast.TFP:+.3f}  GDP {elast.GDP:+.3f}  welfare {elast.welfare:+.3f}")
 
-# Full sweep of all 50 regional shocks + elasticities (~10 minutes).
+# Labeled DataFrame output (top 5 states by labor inflow).
+print(ca.regional_summary().nlargest(5, "L_hat")[["L_hat", "TFPn_hat", "GDPn_hat"]])
+
+# A real-world counterfactual.
+boom = shock_california_computers(raw=raw)
+print(boom.sectoral_summary().nlargest(3, "TFPj_hat"))
+
+# Full regional sweep + elasticity table (~10 minutes).
 sweep = regional_sweep(verbose=True)
-for region_name, row in zip(raw.regions, sweep.elasticities):
-    print(f"{region_name:<20} {row.TFP:+.4f}  {row.GDP:+.4f}  {row.welfare:+.4f}")
+print(sweep.as_dataframe().round(4))
 ```
 
 ## Project layout
 
 ```
 qge/
-├── io.py                  Long-form parquet loader, RawInputs dataclass, validation
+├── io.py                  Long-form parquet loader, RawInputs, validation
 ├── helpers.py             Per-iteration math (P_h_om, Dinprime, Lchange,
 │                          expenditure, GMC, neweq, GOTFP, GDP)
-├── elasticities.py        Aggregate TFP / GDP / welfare elasticity formulas
+├── elasticities.py        Aggregate TFP / GDP / welfare formulas
+├── applications.py        Four CPRHS Section 6 counterfactuals
+├── geographic.py          Trade-cost reduction (distance / other_barriers)
 └── models/
-    └── benchmark.py       compute_baseline + shock + sweep entry points
+    ├── benchmark.py       compute_baseline + shock + sweep entry points
+    └── variants.py        NS / NR / NRNS structural restrictions
 
 data/inputs/cprhs/         CPRHS reference calibration (committed parquet)
+    ├── *.parquet          eight core calibration files
+    ├── applications/      shock data for the four applications
+    └── geographic_barriers/   kappa_hat shocks for trade-cost analysis
 
 scripts/
 └── convert_cprhs.py       MATLAB .mat → canonical parquet converter
 
-tests/                     22 tests — baseline, shocks, elasticities, parquet
-                           round-trip against the published .mat workspaces
+tests/                     43 tests — baseline, shocks, applications,
+                           variants, geographic, elasticities, reporting,
+                           parquet round-trip, validation
 ```
+
+The `qge.applications` and `qge.geographic` modules are CPRHS-specific by design (hardcode US state names and paper-derived constants). Everything else — `io`, `helpers`, `elasticities`, `models/benchmark`, `models/variants` — is calibration-agnostic and operates on whatever's in `RawInputs`.
 
 ## Input data
 
-Inputs are seven long-form parquet files plus a sectoral-dispersion vector, all carrying human-readable sector and region labels:
+The model reads eight parquet files plus two optional shock-data subfolders. **See [DATA.md](DATA.md)** for the full reference: per-file shape, semantic role, CPRHS source, and Canadian analogue.
 
 | file                          | columns                                  | meaning                       |
 |-------------------------------|------------------------------------------|-------------------------------|
@@ -85,14 +102,12 @@ Inputs are seven long-form parquet files plus a sectoral-dispersion vector, all 
 | `employment.parquet`          | `sector, region, value`                  | sector × region employment    |
 | `io_matrix.parquet`           | `source_sector, dest_sector, value`      | input-output coefficient      |
 | `value_added_share.parquet`   | `sector, region, value`                  | γ — value-added share         |
-| `structures_share.parquet`    | `sector, region, value`                  | B — structures share          |
+| `structures_share.parquet`    | `region, value`                          | B — structures share per state |
 | `final_demand_share.parquet`  | `sector, region, value`                  | α — final-demand share        |
 | `portfolio_share.parquet`     | `region, value`                          | ι — global portfolio share    |
 | `sectoral_dispersion.parquet` | `sector, value`                          | 1/θ — Eaton-Kortum elasticity |
 
-The schema is **dimension- and label-agnostic**: nothing in the model assumes 26 sectors or 50 US states. Labels come from the data and propagate to results.
-
-`qge.io.load_inputs(directory)` reads the eight files, validates ranges and finiteness, and returns a `RawInputs` dataclass.
+`qge.io.load_inputs(directory)` reads them, validates shapes / ranges / consistency (e.g. final-demand shares sum to 1 per region; no zero `xbilat` rows; no zero `IO` columns), and returns a `RawInputs` dataclass carrying the arrays plus the sector and region labels.
 
 ## Bringing your own calibration
 
@@ -100,18 +115,24 @@ Drop your parquet files into a sibling directory and point the loader at it:
 
 ```python
 raw_ca = load_inputs("data/inputs/canada_2020/")
-result = compute_baseline(raw=raw_ca)
+baseline_ca = compute_baseline(raw=raw_ca)
 ```
 
-There are no code changes required. The number of sectors and regions is whatever your data provides; the sectoral dispersion vector ships in the same directory.
+The number of sectors and regions follows your data; labels propagate all the way through to the result DataFrames. **[DATA.md](DATA.md)** documents what each input is, suggests Canadian sources, and gives a priority order for assembly.
+
+A few calibration choices the model can't make for you:
+
+- **Sector taxonomy and tradable list** — `compute_baseline_nr` requires `tradable=[...]` (sector names) explicitly. There's no default.
+- **Structures-share aggregation** — the model assumes `B` is constant across sectors per region. If your raw source varies by sector, aggregate before feeding in; the loader rejects sector-varying data with a clear error rather than silently picking row 0.
+- **Global portfolio** — `ι ≡ 0` is the simplest defensible first pass (closed-region capital ownership).
 
 The MATLAB-to-parquet converter (`scripts/convert_cprhs.py`) is the first worked example of how to land in this schema; any other ingestion path (BEA, BLS, Statistics Canada, …) is a peer of it.
 
 ## Testing
 
 ```sh
-uv run pytest                  # all 22 tests, ~40s
-uv run pytest tests/test_parquet_io.py -v
+uv run pytest                                # all 43 tests, ~100s
+uv run pytest tests/test_benchmark_baseline.py -v
 ```
 
 The verification suite requires the CPRHS MATLAB replication kit (available from [the author's site](https://sites.google.com/site/lorenzocaliendo/research/CPRHS)) placed at `CPRHS replication files/` — that folder is gitignored. Without it, the tests skip cleanly and the model still runs against the shipped parquet calibration.

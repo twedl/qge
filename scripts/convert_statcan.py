@@ -71,6 +71,7 @@ PROVINCES: tuple[str, ...] = (
 TABLE_TRADE_SUMMARY = "12100088"  # Interprovincial and international trade flows, summary level
 TABLE_SEPH = "14100202"  # Employment by industry, annual (Survey of Employment, Payrolls and Hours)
 TABLE_LFS = "14100023"   # Labour force characteristics by industry, annual (Labour Force Survey)
+TABLE_GDP_INCOME = "36100221"  # GDP, income-based, provincial and territorial, annual
 
 
 # StatCan summary-level products aggregate into this 22-sector target taxonomy.
@@ -461,6 +462,40 @@ def build_sectoral_dispersion() -> pd.DataFrame:
     )
 
 
+# ---------------------------------------------------------------- structures share
+
+
+def build_structures_share(year: int = DEFAULT_YEAR) -> pd.DataFrame:
+    """Long-form (region, value) capital income share of factor income.
+
+    B_n = Gross Operating Surplus / (Compensation + GOS + Gross Mixed Income)
+
+    Per-province from StatCan Table 36-10-0221-01 (income-based provincial GDP).
+    The model assumes B is constant across sectors within a region; this is a
+    simplification consistent with CPRHS. Gross mixed income (self-employed
+    earnings) is treated as labour for this calculation — a common convention
+    that slightly understates the true capital share in provinces with many
+    unincorporated businesses.
+    """
+    csv_path = _fetch_table(TABLE_GDP_INCOME)
+    df = pd.read_csv(csv_path, dtype={"VALUE": float}, low_memory=False)
+    df = df[df["REF_DATE"] == year]
+    df = df[df["GEO"].isin(PROVINCES)]
+    keep = ["Compensation of employees", "Gross operating surplus", "Gross mixed income"]
+    df = df[df["Estimates"].isin(keep)]
+    pivot = df.pivot_table(
+        index="GEO", columns="Estimates", values="VALUE", aggfunc="sum",
+    )
+    pivot["B"] = pivot["Gross operating surplus"] / (
+        pivot["Compensation of employees"]
+        + pivot["Gross operating surplus"]
+        + pivot["Gross mixed income"]
+    )
+    out = pivot["B"].reindex(PROVINCES).reset_index()
+    out.columns = ["region", "value"]
+    return out
+
+
 # ---------------------------------------------------------------- portfolio share
 
 def build_portfolio_share() -> pd.DataFrame:
@@ -544,6 +579,16 @@ def main() -> None:
     employment.to_parquet(path, index=False)
     print(f"  wrote {path}  ({len(employment):>6d} rows, "
           f"{path.stat().st_size/1024:6.1f} KiB)")
+    print()
+
+    print(f"Building structures_share.parquet for {args.year}...")
+    B = build_structures_share(args.year)
+    print("  B per province:")
+    for _, row in B.iterrows():
+        print(f"    {row['region']:<30} {row['value']:.4f}")
+    path = out_dir / "structures_share.parquet"
+    B.to_parquet(path, index=False)
+    print(f"  wrote {path}")
     print()
 
     print("Building sectoral_dispersion.parquet (CPRHS θ values)...")

@@ -1,9 +1,29 @@
 """Build a Canadian calibration of the qge model from Statistics Canada data.
 
-So far this covers only `bilateral_trade.parquet`, sourced from Table
-12-10-0088-01 (Interprovincial and international trade flows, summary level).
-Subsequent passes will add the other seven inputs (employment, IO matrix,
-value-added share, etc.) from related StatCan Supply-Use-Tables.
+So far this covers two of the eight required inputs:
+
+* ``bilateral_trade.parquet`` — Table 12-10-0088-01, Interprovincial and
+  international trade flows (summary level).
+* ``employment.parquet`` — Table 14-10-0202-01, SEPH (Survey of Employment,
+  Payrolls and Hours), All employees.
+
+Known data-quality caveats:
+
+* **SEPH excludes self-employed.** The Agriculture / Forestry / Fishing
+  sector in employment.parquet captures only forestry employees (NAICS 11N);
+  agriculture proper (NAICS 111-112) and fishing/hunting (114) are absent.
+  This produces zero-employment cells in agriculture-heavy provinces
+  (Manitoba, Saskatchewan, NL) which are economically wrong — those
+  provinces have substantial agricultural labour, just not on a SEPH-eligible
+  payroll. A future refinement should graft in LFS Table 14-10-0023-01
+  numbers for [111-112] and [114] to close the gap.
+* **A few other zero-employment cells** (Computers/Electronics in NB, NL,
+  PEI, SK; Furniture/Other in PEI) likely reflect StatCan confidentiality
+  suppression of small-sample cells.
+
+Subsequent passes will add the remaining six inputs (IO matrix, value-added
+share, structures share, final-demand share, portfolio share, sectoral
+dispersion).
 
 Usage::
 
@@ -49,6 +69,8 @@ PROVINCES: tuple[str, ...] = (
 
 # Statistics Canada table identifiers.
 TABLE_TRADE_SUMMARY = "12100088"  # Interprovincial and international trade flows, summary level
+TABLE_SEPH = "14100202"  # Employment by industry, annual (Survey of Employment, Payrolls and Hours)
+TABLE_LFS = "14100023"   # Labour force characteristics by industry, annual (Labour Force Survey)
 
 
 # StatCan summary-level products aggregate into this 22-sector target taxonomy.
@@ -119,6 +141,68 @@ def _aggregation_map() -> dict[str, str]:
                 raise ValueError(f"product code {code} assigned twice")
             out[code] = target
     return out
+
+
+# NAICS codes (as the SEPH table reports them) mapped to the same 22 sectors.
+# The trade aggregation uses StatCan IO commodity codes (M-codes); SEPH uses
+# industry NAICS codes. The two are different classifications, but at the
+# 22-sector grain they line up.
+#
+# Caveat for "Agriculture, Forestry, Fishing": SEPH only covers payroll
+# employers and therefore reports only forestry + logging support [11N].
+# Agriculture proper (NAICS 111-112) and fishing/hunting (114) are missing
+# because most farms and fishery operations are self-employed and outside
+# SEPH's frame. The resulting employment series for that sector is an
+# undercount of true total labour input. A future refinement would graft in
+# LFS Table 14-10-0023-01 numbers for [111-112] and [114].
+NAICS_TO_SECTOR: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Agriculture, Forestry, Fishing", ("11N",)),
+    ("Mining and Extraction", ("21",)),
+    ("Utilities", ("22",)),
+    ("Construction", ("23",)),
+    ("Food, Beverage, Tobacco", ("311", "312")),
+    ("Textile, Apparel, Leather", ("313", "314", "315", "316")),
+    ("Wood, Paper, Printing", ("321", "322", "323")),
+    ("Petroleum and Chemicals", ("324", "325", "326")),
+    ("Non-metallic Mineral Products", ("327",)),
+    ("Metals and Machinery", ("331", "332", "333")),
+    ("Computers, Electronics, Electrical", ("334", "335")),
+    ("Transportation Equipment", ("336",)),
+    ("Furniture and Other Manufacturing", ("337", "339")),
+    ("Wholesale and Retail Trade", ("41", "44-45")),
+    ("Transportation Services", ("48-49",)),
+    ("Information and Communication", ("51",)),
+    ("Finance and Insurance", ("52",)),
+    ("Real Estate, Rental, Leasing", ("53",)),
+    ("Professional and Administrative Services", ("54", "55", "56")),
+    ("Education", ("61",)),
+    ("Health", ("62",)),
+    ("Arts, Recreation, Accommodation, Food", ("71", "72")),
+    ("Public Administration and Other Services", ("81", "91")),
+)
+
+
+def _naics_aggregation_map() -> dict[str, str]:
+    out: dict[str, str] = {}
+    for target, codes in NAICS_TO_SECTOR:
+        for code in codes:
+            if code in out:
+                raise ValueError(f"NAICS code {code} assigned twice")
+            out[code] = target
+    return out
+
+
+def _naics_first(label: str) -> str | None:
+    """Extract the primary (coarsest) NAICS code from a SEPH industry label.
+
+    SEPH encodes labels like ``Utilities [22,221]`` or ``Educational services
+    [61,611]``; we keep the first comma-separated code, which is always the
+    coarsest level (NAICS-2 for services, NAICS-3 for manufacturing).
+    """
+    m = re.search(r"\[([^\]]+)\]$", label.strip())
+    if m is None:
+        return None
+    return m.group(1).split(",")[0]
 
 
 # ---------------------------------------------------------------- helpers
@@ -230,10 +314,102 @@ def build_bilateral_trade(year: int = DEFAULT_YEAR) -> pd.DataFrame:
     )
 
 
+# ---------------------------------------------------------------- employment
+
+# LFS NAICS labels (Table 14-10-0023-01) that cover Agriculture/Forestry/Fishing.
+# These three rows together capture NAICS 11 (excluding agriculture-support
+# services 1151-1152 which LFS folds into the [111-112] aggregate).
+_LFS_AG_NAICS = (
+    "Agriculture [111-112, 1100, 1151-1152]",
+    "Forestry and logging and support activities for forestry [113, 1153]",
+    "Fishing, hunting and trapping [114]",
+)
+
+
+def _lfs_agriculture(year: int) -> pd.Series:
+    """LFS-sourced Agriculture/Forestry/Fishing employment per province.
+
+    Returns a Series indexed by province name (persons, not thousands). LFS
+    captures the self-employed that SEPH misses, which matters most for this
+    sector — agriculture in particular is dominated by self-employed farmers.
+    """
+    csv_path = _fetch_table(TABLE_LFS)
+    df = pd.read_csv(csv_path, dtype={"VALUE": float}, low_memory=False)
+    df = df[df["REF_DATE"] == year]
+    df = df[df["GEO"].isin(PROVINCES)]
+    df = df[df["Labour force characteristics"] == "Employment"]
+    df = df[df["Age group"] == "15 years and over"]
+    df = df[df["Gender"] == "Total - Gender"]
+    df = df[
+        df["North American Industry Classification System (NAICS)"].isin(_LFS_AG_NAICS)
+    ]
+    # LFS VALUE is in thousands of persons; convert to persons.
+    persons = df.groupby("GEO")["VALUE"].sum() * 1000
+    return persons.reindex(PROVINCES).fillna(0.0)
+
+
+def build_employment(year: int = DEFAULT_YEAR) -> pd.DataFrame:
+    """Return long-form (sector, region, value) employment by industry × province.
+
+    Sources:
+        SEPH Table 14-10-0202-01 (All employees) for most sectors — provides
+        NAICS-3 manufacturing sub-sector detail.
+        LFS Table 14-10-0023-01 (Employment, 15+, all genders) for
+        Agriculture/Forestry/Fishing — SEPH excludes most self-employed and
+        therefore covers only forestry (NAICS 11N), missing the bulk of
+        actual labour in that sector.
+
+    Mixing two sources is methodologically imperfect — SEPH counts payroll
+    employees only while LFS includes the self-employed — but the
+    alternative (SEPH-only) reports zero agricultural employment in
+    Manitoba/Saskatchewan/NL, which is economically wrong. Provinces with
+    very small SEPH cells in other sectors (Computers/Electronics in NB,
+    NL, PEI, SK; Furniture in PEI) are left at zero — the model treats
+    them as economically zero, which the trade data confirms is roughly
+    accurate for those (sector, region) combinations.
+    """
+    csv_path = _fetch_table(TABLE_SEPH)
+    df = pd.read_csv(csv_path, dtype={"VALUE": float}, low_memory=False)
+
+    df = df[df["REF_DATE"] == year]
+    if df.empty:
+        raise ValueError(f"no rows for year {year} in {csv_path}")
+    df = df[df["GEO"].isin(PROVINCES)]
+    df = df[df["Type of employee"] == "All employees"]
+
+    naics_col = "North American Industry Classification System (NAICS)"
+    df = df.assign(naics=df[naics_col].apply(_naics_first))
+    naics_map = _naics_aggregation_map()
+    df["sector"] = df["naics"].map(naics_map)
+    df = df[df["sector"].notna()]
+
+    df = df.rename(columns={"VALUE": "value", "GEO": "region"})
+    df = df.groupby(["sector", "region"], as_index=False)["value"].sum()
+    df["value"] = df["value"].fillna(0.0)
+
+    sectors = tuple(s for s, _ in NAICS_TO_SECTOR)
+    idx = pd.MultiIndex.from_product(
+        [sectors, PROVINCES], names=["sector", "region"]
+    )
+    out = (
+        df.set_index(["sector", "region"])["value"]
+        .reindex(idx)
+        .fillna(0.0)
+        .reset_index()
+    )
+
+    # Overwrite the Agriculture/Forestry/Fishing row with LFS data.
+    ag_lfs = _lfs_agriculture(year)
+    ag_mask = out["sector"] == "Agriculture, Forestry, Fishing"
+    out.loc[ag_mask, "value"] = out.loc[ag_mask, "region"].map(ag_lfs).to_numpy()
+
+    return out.sort_values(["sector", "region"]).reset_index(drop=True)
+
+
 # ---------------------------------------------------------------- diagnostics
 
 
-def summarize(df: pd.DataFrame) -> None:
+def summarize_trade(df: pd.DataFrame) -> None:
     sectors = df["sector"].drop_duplicates().tolist()
     print(f"sectors:  {len(sectors)}")
     print(f"regions:  {df['source'].nunique()} sources × "
@@ -241,20 +417,34 @@ def summarize(df: pd.DataFrame) -> None:
     print(f"rows:     {len(df)}   (expected: {len(sectors)} × "
           f"{df['source'].nunique()}² = {len(sectors) * df['source'].nunique()**2})")
 
-    # Gross output per (sector, source) = exports + intra-province trade
     pivot = df.pivot_table(
         index="sector", columns="source", values="value", aggfunc="sum",
     )
-    gross_out = pivot  # source side already
-    zero_cells = (gross_out == 0).sum().sum()
-    near_zero = ((gross_out > 0) & (gross_out < 1)).sum().sum()
-    print(f"gross-output zero cells:     {zero_cells} / {gross_out.size}")
+    zero_cells = (pivot == 0).sum().sum()
+    near_zero = ((pivot > 0) & (pivot < 1)).sum().sum()
+    print(f"gross-output zero cells:     {zero_cells} / {pivot.size}")
     print(f"gross-output near-zero (<1): {near_zero}")
     if zero_cells:
-        zeros = gross_out.stack()[gross_out.stack() == 0]
+        zeros = pivot.stack()[pivot.stack() == 0]
         print("  first 8 zero-output cells (sector, province):")
         for (sec, src), _ in list(zeros.items())[:8]:
             print(f"    {sec!r}  ×  {src!r}")
+
+
+def summarize_employment(df: pd.DataFrame) -> None:
+    sectors = df["sector"].drop_duplicates().tolist()
+    print(f"sectors:  {len(sectors)}")
+    print(f"regions:  {df['region'].nunique()}")
+    print(f"rows:     {len(df)}   (expected: {len(sectors) * df['region'].nunique()})")
+    pivot = df.pivot_table(index="sector", columns="region", values="value")
+    zero_cells = (pivot == 0).sum().sum()
+    print(f"zero-employment cells:       {zero_cells} / {pivot.size}")
+    if zero_cells:
+        zeros = pivot.stack()[pivot.stack() == 0]
+        print("  zero-employment cells (sector, region):")
+        for (sec, reg), _ in list(zeros.items())[:8]:
+            print(f"    {sec!r}  ×  {reg!r}")
+    print(f"total employment: {df['value'].sum():>12,.0f} persons")
 
 
 # ---------------------------------------------------------------- main
@@ -270,12 +460,19 @@ def main() -> None:
 
     print(f"Building bilateral_trade.parquet for {args.year}...")
     trade = build_bilateral_trade(args.year)
-    summarize(trade)
-    print()
-
+    summarize_trade(trade)
     path = out_dir / "bilateral_trade.parquet"
     trade.to_parquet(path, index=False)
     print(f"  wrote {path}  ({len(trade):>6d} rows, "
+          f"{path.stat().st_size/1024:6.1f} KiB)")
+    print()
+
+    print(f"Building employment.parquet for {args.year}...")
+    employment = build_employment(args.year)
+    summarize_employment(employment)
+    path = out_dir / "employment.parquet"
+    employment.to_parquet(path, index=False)
+    print(f"  wrote {path}  ({len(employment):>6d} rows, "
           f"{path.stat().st_size/1024:6.1f} KiB)")
 
 

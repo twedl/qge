@@ -11,8 +11,9 @@ Reference: [Lorenzo Caliendo · CDP research](https://sites.google.com/site/lore
 - **Phase 2b — Step 2 dynamic baseline 2000-2007 is done.** 28 quarter-by-quarter temporary-equilibrium solves with data-target factor prices and trade shares. Verified against `Baseline_2000_2007_economy_actual.mat` (rtol=1e-4 absorbing accumulated solver-tolerance round-off).
 - **Phase 2c — Step 3 forward simulation from 2007 is done.** 200-period dynamic forward simulation with constant fundamentals, forward-looking value functions Yt, and migration flows μ derived from the Bellman recursion. Outer fixed-point on Yt converges in one iteration when seeded with the saved `Hvectnoshock`. Verified against `Baseline_2007.mat` and `Baseline_economy_2007_forward.mat` (rtol=5e-3 to 2e-2 absorbing the half-step inconsistency in the saved fixture and 200-quarter accumulation).
 - **Phase 2d — Step 4 stitch is done.** Combines Phase 2a/2b/2c outputs into a single 200-quarter baseline economy (220 transitions for μ). Pure array splicing — no new computation. Verified against `Baseline_economy.mat` (HDF5/v7.3, loaded via h5py).
+- **Phase 3 — China-shock counterfactual is done.** Inverts the estimated 2000-2007 China TFP gains in 12 tradable sectors (region 56, sectors 0..11). Outer Bellman fixed-point on the value-function path V; mu and labor evolution use baseline references; 200 inner temporary equilibria with `A_hat = 1/china_TFP`. Verified against `Counterfactual_economy.mat`.
 
-**Phase 2 (the full dynamic baseline) is complete.** 29 fast tests pass; the full integration verification across Steps 1-4 is `@pytest.mark.slow` (~10-15 min, dominated by the 200 inner solves in Step 3).
+**Phase 2 + Phase 3 are complete.** 31 fast tests pass; the full integration across Phase 2b/2c/2d/3 is `@pytest.mark.slow` (~15 min, dominated by the 200 inner solves).
 
 Remaining work:
 - **Phase 3** — counterfactual with China-shock removed
@@ -69,11 +70,13 @@ cdp/
 │   ├── dynamic.py                     # Step 1 quarterly series + LMC
 │   ├── dynamic_helpers.py             # P_h_om_tvf, Dinprime_tvf
 │   ├── forward_dynamics.py            # mu path, labor evolution, Bellman update
+│   ├── counterfactual_dynamics.py     # China shock, mu_cf, Bellman update for V
 │   └── models/
 │       ├── base_year.py               # solvewnew, compute_baseline
 │       ├── dynamic_baseline.py        # solve_tvf, compute_dynamic_baseline_2000_2007
 │       ├── forward_simulation.py      # compute_baseline_forward_2007 (Step 3)
-│       └── baseline_economy.py        # stitch_baseline_economy (Step 4)
+│       ├── baseline_economy.py        # stitch_baseline_economy (Step 4)
+│       └── counterfactual.py          # compute_counterfactual_economy (Phase 3)
 ├── data/inputs/cdp_2000/              # 6 parquet files
 ├── scripts/convert_cdp_txt.py         # .txt → parquet converter
 ├── tests/                             # 18 tests

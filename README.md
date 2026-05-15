@@ -7,7 +7,7 @@ Python implementations of quantitative general-equilibrium models from the Calie
 | dir | model | reference | status |
 |---|---|---|---|
 | [`cprhs/`](cprhs/) | Caliendo, Parro, Rossi-Hansberg, Sarte — *The Impact of Regional and Sectoral Productivity Changes in the U.S. Economy* | [author site](https://sites.google.com/site/lorenzocaliendo/research/CPRHS) | working; verified to MATLAB workspaces at machine epsilon; ships a CPRHS reference calibration and a Canadian calibration (`canada_2021`) plus an extended 17-region partner version |
-| [`cdp/`](cdp/) | Caliendo, Dvorkin, Parro — dynamic labor-market trade model | [author site](https://sites.google.com/site/lorenzocaliendo/research/cdp) | Phase 1 + full Phase 2 done (static 2000 base year + 2000-2007 dynamic baseline + 2007-forward simulation + stitch); counterfactual (Phase 3) next |
+| [`cdp/`](cdp/) | Caliendo, Dvorkin, Parro — dynamic labor-market trade model | [author site](https://sites.google.com/site/lorenzocaliendo/research/cdp) | Phase 1 + Phase 2 + Phase 3 done (static base year, full dynamic baseline 2000-forward, China-shock counterfactual); employment/welfare analysis next |
 
 ## Working in a sub-project
 

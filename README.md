@@ -13,8 +13,9 @@ Ported and verified against the MATLAB workspaces to machine epsilon (relative e
 - **Model variants** — NS (no sectoral linkages), NR (no regional trade), NRNS (both) baselines.
 - **Geographic-barriers** counterfactuals — distance and other-barriers scenarios.
 - **Reporting layer** — `.regional_summary()`, `.sectoral_summary()`, `.as_dataframe()` on every result type; outputs are pandas DataFrames indexed by sector / region names.
+- **Canadian calibration** — `data/inputs/canada_2021/` built from StatCan provincial symmetric IOTs (catalogue 15-211-X, Link-1997 level). 23 sectors × 11 regions (10 provinces + Rest of World; territories folded into ROW). Baseline solves in ~0.2s; full regional sweep in ~3s.
 
-**43 tests pass in ~100 seconds.**
+**44 tests pass in ~100 seconds.**
 
 Not yet ported: the variant shock scripts (Regional_shocks_NS, Sectoral_shocks_NR, Regional_shocks_NRNS — they use `P_h_omNI`) and the Efficient (planner's allocation) model. The translation machinery is in place for both.
 
@@ -81,11 +82,14 @@ data/inputs/cprhs/         CPRHS reference calibration (committed parquet)
     ├── *.parquet          eight core calibration files
     ├── applications/      shock data for the four applications
     └── geographic_barriers/   kappa_hat shocks for trade-cost analysis
+data/inputs/canada_2021/   Canadian calibration (StatCan IOTs L97, 2021)
 
 scripts/
-└── convert_cprhs.py       MATLAB .mat → canonical parquet converter
+├── convert_cprhs.py       MATLAB .mat → CPRHS parquet
+├── convert_statcan.py     StatCan WDS API helpers (employment, θ, portfolio)
+└── build_canada_iot.py    StatCan 15-211-X IOTs → canada_YYYY/ (top-level Canadian entry point)
 
-tests/                     43 tests — baseline, shocks, applications,
+tests/                     44 tests — baseline, shocks, applications,
                            variants, geographic, elasticities, reporting,
                            parquet round-trip, validation
 ```
@@ -114,11 +118,11 @@ The model reads eight parquet files plus two optional shock-data subfolders. **S
 Drop your parquet files into a sibling directory and point the loader at it:
 
 ```python
-raw_ca = load_inputs("data/inputs/canada_2020/")
+raw_ca = load_inputs("data/inputs/canada_2021/")
 baseline_ca = compute_baseline(raw=raw_ca)
 ```
 
-The number of sectors and regions follows your data; labels propagate all the way through to the result DataFrames. **[DATA.md](DATA.md)** documents what each input is, suggests Canadian sources, and gives a priority order for assembly.
+The number of sectors and regions follows your data; labels propagate all the way through to the result DataFrames. **[DATA.md](DATA.md)** documents what each input is, suggests Canadian sources, and gives a priority order for assembly. `scripts/build_canada_iot.py` is the worked example for Canada — it builds all eight inputs from the StatCan provincial symmetric IOTs (one Excel workbook per province + territory) using a 186-industry L97 taxonomy aggregated to 23 model sectors.
 
 A few calibration choices the model can't make for you:
 
@@ -126,12 +130,12 @@ A few calibration choices the model can't make for you:
 - **Structures-share aggregation** — the model assumes `B` is constant across sectors per region. If your raw source varies by sector, aggregate before feeding in; the loader rejects sector-varying data with a clear error rather than silently picking row 0.
 - **Global portfolio** — `ι ≡ 0` is the simplest defensible first pass (closed-region capital ownership).
 
-The MATLAB-to-parquet converter (`scripts/convert_cprhs.py`) is the first worked example of how to land in this schema; any other ingestion path (BEA, BLS, Statistics Canada, …) is a peer of it.
+The MATLAB-to-parquet converter (`scripts/convert_cprhs.py`) is the first worked example of how to land in this schema; `scripts/build_canada_iot.py` is a second (StatCan IOTs → 23 sectors × 11 regions). Any other ingestion path (BEA, BLS, Eurostat, …) is a peer of these.
 
 ## Testing
 
 ```sh
-uv run pytest                                # all 43 tests, ~100s
+uv run pytest                                # all 44 tests, ~100s
 uv run pytest tests/test_benchmark_baseline.py -v
 ```
 

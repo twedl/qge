@@ -19,7 +19,6 @@ import h5py
 import numpy as np
 import pytest
 
-from qge.dynamic import build_quarterly_series
 from qge.models.baseline_economy import stitch_baseline_economy
 from qge.models.dynamic_baseline import compute_dynamic_baseline_2000_2007
 from qge.models.forward_simulation import compute_baseline_forward_2007
@@ -45,11 +44,10 @@ def step4_fixture():
 
 
 @pytest.fixture(scope="module")
-def step4_python(raw, baseline):
+def step4_python(raw, baseline, quarterly):
     if not REP_DIR.exists():
         pytest.skip(f"CDP replication kit not present: {REP_DIR}")
     Yt_seed = _load_Hvectnoshock()
-    quarterly = build_quarterly_series(REP_DIR, baseline, raw.gamma, raw.B)
     dynamic_2007 = compute_dynamic_baseline_2000_2007(
         raw=raw, baseline=baseline, quarterly=quarterly,
     )

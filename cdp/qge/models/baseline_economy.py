@@ -44,6 +44,8 @@ from qge.models.forward_simulation import (
 
 TOTAL_QUARTERS = 200
 TOTAL_MU_TRANSITIONS = 220
+_FORWARD_QUARTERS = TOTAL_QUARTERS - N_QUARTERS          # 171: slices 1..171 of Phase 2c
+_FORWARD_MU_SLOTS = TOTAL_MU_TRANSITIONS - N_TRANS       # 192: slices 0..191 of Phase 2c
 
 
 @dataclass(frozen=True)
@@ -58,54 +60,45 @@ class BaselineEconomy:
     L0_initial: np.ndarray             # (RJ1,)
 
 
+def _splice(phase_2b: np.ndarray, phase_2c: np.ndarray) -> np.ndarray:
+    """Stitch a Phase 2b array (29 slices) with Phase 2c slices 1..171.
+
+    The MATLAB convention skips Phase 2c slice 0 because it equals the
+    2007Q4 anchor already saved as the last slot of Phase 2b.
+    """
+    out = np.empty(phase_2b.shape[:-1] + (TOTAL_QUARTERS,))
+    out[..., :N_QUARTERS] = phase_2b
+    out[..., N_QUARTERS:] = phase_2c[..., 1:1 + _FORWARD_QUARTERS]
+    return out
+
+
 def stitch_baseline_economy(
     quarterly: QuarterlySeries,
     dynamic_2007: DynamicBaseline2000_2007,
     forward: ForwardSimulation,
 ) -> BaselineEconomy:
     """Combine the three phases into one 2000-forward dataset."""
-    # The Phase 2c arrays carry 200 slices; we splice in slices 1..171
-    # (Python 0-indexed) starting at TOTAL_QUARTERS slot 29. The MATLAB
-    # convention ignores forward slice 0 because it equals the 2007Q4
-    # anchor that's already saved as the last slot of Phase 2b.
-    after_anchor = TOTAL_QUARTERS - N_QUARTERS         # 200 - 29 = 171
+    R = quarterly.series_Ljn0hat.shape[1]
 
-    def _splice(phase_2b: np.ndarray, phase_2c: np.ndarray) -> np.ndarray:
-        out = np.empty(phase_2b.shape[:-1] + (TOTAL_QUARTERS,))
-        out[..., :N_QUARTERS] = phase_2b
-        out[..., N_QUARTERS:] = phase_2c[..., 1:1 + after_anchor]
-        return out
-
-    series_xbilat = _splice(
-        dynamic_2007.New_series_xbilat, forward.xbilat_out,
-    )
-    series_pi = _splice(
-        dynamic_2007.New_Din_baseline, forward.pi_baseline,
-    )
-    series_wages = _splice(
-        dynamic_2007.New_series_wageshat, forward.wages0,
+    # series_Ljnhat: drop non-employment row 0; Phase 2c's US block is the
+    # first R cols of Ljn_hat0.
+    series_Ljnhat = _splice(
+        quarterly.series_Ljn0hat[1:, :, :],
+        forward.Ljn_hat0[:, :R, :],
     )
 
-    # series_Ljnhat: drop non-employment row 0 from Phase 2a's hat series,
-    # then splice Phase 2c's US block (the first R cols of Ljn_hat0).
-    JNT1, R, _ = quarterly.series_Ljn0hat.shape
-    J = JNT1 - 1
-    series_Ljnhat = np.empty((J, R, TOTAL_QUARTERS))
-    series_Ljnhat[..., :N_QUARTERS] = quarterly.series_Ljn0hat[1:, :, :]
-    series_Ljnhat[..., N_QUARTERS:] = forward.Ljn_hat0[:, :R, 1:1 + after_anchor]
-
-    # series_mu: 28 Phase 2a slices + 192 Phase 2c slices.
-    forward_mu_slots = TOTAL_MU_TRANSITIONS - N_TRANS  # 220 - 28 = 192
+    # series_mu has a different splice convention (28 Phase 2a + 192 Phase
+    # 2c slices starting at index 0, not 1) — done inline.
     series_mu = np.empty(
         quarterly.series_mu.shape[:-1] + (TOTAL_MU_TRANSITIONS,)
     )
     series_mu[..., :N_TRANS] = quarterly.series_mu
-    series_mu[..., N_TRANS:] = forward.mu[..., :forward_mu_slots]
+    series_mu[..., N_TRANS:] = forward.mu[..., :_FORWARD_MU_SLOTS]
 
     return BaselineEconomy(
-        series_xbilat=series_xbilat,
-        series_pi=series_pi,
-        series_wages=series_wages,
+        series_xbilat=_splice(dynamic_2007.New_series_xbilat, forward.xbilat_out),
+        series_pi=_splice(dynamic_2007.New_Din_baseline, forward.pi_baseline),
+        series_wages=_splice(dynamic_2007.New_series_wageshat, forward.wages0),
         series_Ljnhat=series_Ljnhat,
         series_mu=series_mu,
         L0_initial=quarterly.L0_initial,
@@ -114,8 +107,8 @@ def stitch_baseline_economy(
 
 def compute_baseline_economy(
     Yt_seed: np.ndarray,
+    rep_dir: Path,
     raw: RawInputs | None = None,
-    rep_dir: Path | None = None,
     *,
     verbose: bool = False,
 ) -> BaselineEconomy:
@@ -124,7 +117,6 @@ def compute_baseline_economy(
     if raw is None:
         raw = load_inputs()
     baseline = compute_baseline(raw=raw, tol=1e-7, vfactor=-0.05)
-    assert rep_dir is not None, "rep_dir required"
     quarterly = build_quarterly_series(rep_dir, baseline, raw.gamma, raw.B)
     dynamic_2007 = compute_dynamic_baseline_2000_2007(
         raw=raw, baseline=baseline, quarterly=quarterly, verbose=verbose,

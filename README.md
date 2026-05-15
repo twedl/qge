@@ -13,7 +13,7 @@ Ported and verified against the MATLAB workspaces to machine epsilon (relative e
 - **Model variants** — NS (no sectoral linkages), NR (no regional trade), NRNS (both) baselines.
 - **Geographic-barriers** counterfactuals — distance and other-barriers scenarios.
 - **Reporting layer** — `.regional_summary()`, `.sectoral_summary()`, `.as_dataframe()` on every result type; outputs are pandas DataFrames indexed by sector / region names.
-- **Canadian calibration** — `data/inputs/canada_2021/` built from StatCan provincial symmetric IOTs (catalogue 15-211-X, Link-1997 level). 23 sectors × 11 regions (10 provinces + Rest of World; territories folded into ROW). Baseline solves in ~0.2s; full regional sweep in ~3s.
+- **Canadian calibration** — `data/inputs/canada_2021/` built from StatCan provincial symmetric IOTs (catalogue 15-211-X, Link-1997 level) for the Canadian provinces and from OECD ICIO 2021 for Rest of World. 23 sectors × 11 regions (10 provinces + ROW; territories folded into ROW). Baseline solves in ~0.2s; full regional sweep in ~3s.
 
 **44 tests pass in ~100 seconds.**
 
@@ -87,7 +87,8 @@ data/inputs/canada_2021/   Canadian calibration (StatCan IOTs L97, 2021)
 scripts/
 ├── convert_cprhs.py       MATLAB .mat → CPRHS parquet
 ├── convert_statcan.py     StatCan WDS API helpers (employment, θ, portfolio)
-└── build_canada_iot.py    StatCan 15-211-X IOTs → canada_YYYY/ (top-level Canadian entry point)
+├── build_canada_iot.py    StatCan 15-211-X IOTs → canada_YYYY/ (synthetic ROW)
+└── add_icio_row.py        OECD ICIO ROW overrides → real bilateral/γ/α for Rest of World
 
 tests/                     44 tests — baseline, shocks, applications,
                            variants, geographic, elasticities, reporting,

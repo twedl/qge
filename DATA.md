@@ -215,13 +215,53 @@ Both `(sector, destination, source, value)`, `J · N · N` rows. `kappa_hat` mat
 
 ---
 
+## Future improvements
+
+Known gaps in the current `canada_2021` calibration, ordered by expected impact.
+
+**Rest of World (ROW)**
+- *Was:* synthetic — gross output set to 50× Canada per sector, intra-trade as a residual, γ/α/B copied from the Canadian provincial average, employment scaled from Canada.
+- *Now (Option 1, done):* `scripts/add_icio_row.py` aggregates real non-Canadian data from OECD ICIO 2023 (year 2021 to match StatCan vintage). Replaces ROW intra-trade (bilateral_trade), γ (value_added_share), and α (final_demand_share). Run after `build_canada_iot.py`. ROW B and ROW employment still use the Canadian-average / Canadian-proportional fallbacks because ICIO carries neither a wages/GOS decomposition nor employment counts — they're noted limitations below.
+- *Better (Option 2, future):* decompose ROW into the major Canadian trading partners — USA (~75% of Canadian external trade), China, EU, UK, Japan, Mexico — plus a residual. Schema scales to ~17 regions; no model changes required (`RawInputs` is region-count agnostic). Requires bilateral concordance between ICIO ISIC and our NAICS-based 23-sector taxonomy.
+- *Best (Option 3, future):* keep all 80 non-Canadian ICIO countries as their own regions. 10 Canadian provinces + 80 country regions = 90-region model, giving full bilateral resolution for every Canada-vs-country shock. Watch for the interior-equilibria constraint at this granularity — many tiny country × narrow sector cells will be near-zero, so aggregation to a slightly coarser sector taxonomy (or omitting a handful of micro-economies) may be required. The model itself doesn't care about `N=90` vs `N=11` — just keep `N²` trade dense enough.
+
+**Employment for ROW**
+- *Currently:* 50× Canadian total, distributed across sectors in Canadian proportions.
+- *Better:* ILO Modelled Estimates by industry × country, summed across non-Canadian economies. Substantial difference for the sector mix (e.g., agriculture is ~25% of world employment vs. ~2% in Canada).
+
+**Trade elasticities θ_j**
+- *Currently:* CPRHS US-estimated values, mapped to our 23 sectors with simple averages where two CPRHS sectors collapse into one. Tombe & Albrecht (2016) and Caliendo & Parro (2015) have Canadian estimates for some sectors.
+- *Better:* commission Canada-specific gravity estimates, or use sector-by-sector estimates from Tombe-Albrecht where they exist and fall back to CPRHS for the rest.
+
+**Geographic barriers (`kappa_*.parquet`)**
+- *Currently:* only US estimates exist (CPRHS).
+- *Better:* provincial gravity regression on interprovincial trade flows (the new L97 IOTs give the response data for free; needs a distance / language / institutional-barrier covariate set on the right-hand side).
+
+**Manufacturing γ at NAICS-4 or NAICS-5**
+- *Currently:* 23-sector aggregation collapses ~71 L97 manufacturing industries into 8 sub-sectors (NAICS-3 level). Within-sub-sector γ heterogeneity is lost.
+- *Better:* widen the sector taxonomy to NAICS-4 — but then sparse cells (small province × narrow manufacturing) need region consolidation. Tradeoff: detail vs. interior-equilibrium constraint.
+
+**Final demand share α at purchaser prices**
+- *Currently:* computed from BasicPrice cols. Households face *purchaser* prices (basic + taxes + retail margins), and α is meant to be a preference share.
+- *Better:* use the IOT's Purchaser sheet directly. Bias is small at the 23-sector grain but non-zero.
+
+**Tradable / non-tradable split for `compute_baseline_nr`**
+- *Currently:* unspecified for the Canadian taxonomy (the NR variant won't run on `canada_2021/`).
+- *Better:* designate ~13 tradable sectors (everything ex-services, ex-construction, ex-utilities) by name. Trivial — just needs a single tuple checked in.
+
+**Owner-occupied dwellings imputation**
+- *Currently:* maps to `Real Estate, Rental, Leasing` along with actual market real estate. The OOD figure is large (it's the imputed rent of homeowners) and somewhat distorts the sector γ.
+- *Better:* split OOD into its own sector, or net it out of α (since it has no observed trade or employment).
+
+---
+
 ## How the loader uses these files
 
 ```python
 from qge.io import load_inputs
 from qge.models.benchmark import compute_baseline
 
-raw = load_inputs("data/inputs/canada_2020/")   # validates ranges, shapes, completeness
+raw = load_inputs("data/inputs/canada_2021/")   # validates ranges, shapes, completeness
 result = compute_baseline(raw=raw)               # everything below derives from `raw`
 ```
 

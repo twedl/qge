@@ -35,59 +35,9 @@ import pandas as pd
 
 # ---------------------------------------------------------------- labels
 
-SECTORS: tuple[str, ...] = (
-    "Food, Beverage, Tobacco",
-    "Textile, Apparel, Leather",
-    "Wood, Paper, Printing",
-    "Petroleum and Coal",
-    "Chemical",
-    "Plastics and Rubber",
-    "Nonmetallic Mineral Products",
-    "Primary Metal and Fabricated Metal",
-    "Machinery",
-    "Computer, Electronic, Electrical",
-    "Transportation Equipment",
-    "Furniture and Miscellaneous Manufacturing",
-    "Wholesale and Retail Trade",
-    # End of 13 tradables — sectors 1-13
-    "Construction",
-    "Transport Services",
-    "Information Services",
-    "Finance and Insurance",
-    "Real Estate",
-    "Education",
-    "Health Care",
-    "Accommodation and Food Services",
-    "Other Services",
-    # End of 9 non-tradables — sectors 14-22
+from qge.labels import (  # noqa: E402 — sys.path tweak above for script use
+    COUNTRIES, IO_BLOCKS, N_TRADABLES, REGIONS, SECTORS, US_STATES,
 )
-N_TRADABLES = 13
-
-US_STATES: tuple[str, ...] = (
-    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
-    "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
-    "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
-    "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
-    "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada",
-    "New Hampshire", "New Jersey", "New Mexico", "New York",
-    "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon",
-    "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
-    "Tennessee", "Texas", "Utah", "Vermont", "Virginia and DC",
-    "Washington", "West Virginia", "Wisconsin", "Wyoming",
-)
-
-COUNTRIES: tuple[str, ...] = (
-    "Australia", "Austria", "Belgium", "Bulgaria", "Brazil", "Canada",
-    "China", "Cyprus", "Czech Republic", "Denmark", "Estonia", "Finland",
-    "France", "Germany", "Greece", "Hungary", "India", "Indonesia",
-    "Italy", "Ireland", "Japan", "Lithuania", "Mexico", "Netherlands",
-    "Poland", "Portugal", "Romania", "Russia", "Spain", "Slovak Republic",
-    "Slovenia", "South Korea", "Sweden", "Taiwan", "Turkey",
-    "United Kingdom", "Rest of World",
-)
-
-REGIONS: tuple[str, ...] = US_STATES + COUNTRIES   # 87 total
-IO_BLOCKS: tuple[str, ...] = ("United States",) + COUNTRIES  # 38 blocks
 
 # Sectoral dispersion 1/θ. Order matches SECTORS, hard-coded in Base_year.m.
 # First 12 sectors have measured θ; sectors 13-22 share θ = 4.55 (the

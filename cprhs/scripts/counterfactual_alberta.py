@@ -131,6 +131,53 @@ def main() -> None:
     print(f"Alberta–USA              trade-weighted average trade cost: {avg_us:.1%}")
     print(f"Alberta–within-Canada    trade-weighted average trade cost: {avg_can:.1%}")
 
+    # ---- Step 2: counterfactual ----------------------------------------
+
+    factor = (1 + avg_us) / (1 + avg_can)
+    print(f"\nCounterfactual: lift AB↔province iceberg costs by {factor:.3f}× "
+          f"in every tradable sector\n(brings AB-within-Canada average up to AB-USA level).")
+
+    kappa_hat = np.ones((raw.J, raw.N, raw.N))
+    for j in tradable_idx:
+        for p in other_provinces:
+            p_idx = raw.regions.index(p)
+            kappa_hat[j, ab, p_idx] = factor
+            kappa_hat[j, p_idx, ab] = factor
+    kappa_hat_2d = kappa_hat.reshape(raw.J * raw.N, raw.N)
+
+    result = _run_shock(
+        lambda_hat=np.ones((raw.J, raw.N)),
+        baseline=None, raw=raw, kappa_hat=kappa_hat_2d,
+        tol=1e-8, vfactor=-0.1, maxit=1_000_000, verbose=False,
+    )
+    print(f"Solved in {result.iterations} iterations.\n")
+
+    summary = result.regional_summary()
+    summary["real_GDPn_hat"] = summary["GDPn_hat"] / summary["P_index_hat"]
+
+    cols = ["L_hat", "P_index_hat", "TFPn_hat", "GDPn_hat", "real_GDPn_hat"]
+    rows_to_print = ["Alberta"] + [p for p in CANADIAN_PROVINCES if p != "Alberta"]
+
+    # ROC aggregate: VA-weighted mean over the 9 other provinces.
+    roc_va = summary.loc[rows_to_print[1:], "VAn0"].to_numpy()
+    roc_w = roc_va / roc_va.sum()
+    roc_row = pd.Series(
+        {c: float(np.sum(summary.loc[rows_to_print[1:], c].to_numpy() * roc_w))
+         for c in cols},
+        name="Rest of Canada (VA-weighted)",
+    )
+
+    out = pd.concat([summary.loc[rows_to_print, cols], roc_row.to_frame().T])
+
+    def pct(v: float) -> str:
+        return f"{(v - 1) * 100:+6.2f}%"
+
+    print("Counterfactual outcomes (% change from baseline):\n")
+    print(out.map(pct).to_string())
+    print(f"\nAggregate world welfare V_hat:    {pct(result.V_hat)}")
+    print(f"Aggregate world TFP_hat:          {pct(result.TFP_hat)}")
+    print(f"Aggregate world GDP_hat:          {pct(result.GDP_hat)}")
+
 
 if __name__ == "__main__":
     main()

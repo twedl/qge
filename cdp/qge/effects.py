@@ -91,7 +91,10 @@ def compute_employment_effects(
     )
     L_cf = counterfactual.Ldyn
 
-    horizon = time - 1                          # MATLAB Time = 199, last filled slot
+    # MATLAB Time = 199 (1-indexed) — the last filled slot. Slot 200 is
+    # the zero boundary set by the labor-evolution loop. In Python 0-indexed
+    # that's index 198.
+    horizon = time - 2
     # Drop the non-employment row to get employment-only labor.
     emp_baseline = L_baseline[1:, :, horizon]
     emp_cf = L_cf[1:, :, horizon]

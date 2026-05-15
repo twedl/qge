@@ -57,14 +57,24 @@ class CounterfactualEconomy:
     outer_iters: int
 
 
-def _evolve_labor_forward(
-    mu_path: np.ndarray, L0: np.ndarray, *, J: int, R: int,
+def _evolve_labor_forward_cf(
+    mu_path: np.ndarray,
+    mu_baseline_first: np.ndarray,
+    L0: np.ndarray,
+    *, J: int, R: int,
 ) -> np.ndarray:
-    """Apply mu_path forward to L0, returning (J+1, R, time) US labor."""
+    """Apply the counterfactual mu_path forward to L0.
+
+    Counterfactual-specific: the *first* labor step uses the baseline
+    migration matrix (``mu_baseline_first``), not ``mu_path[..., 0]``
+    which is the unnormalized "jump" matrix for the value-function
+    recurrence. Subsequent steps use ``mu_path[..., 1..]``.
+    """
     RJ1, _, time = mu_path.shape
     Ldyn = np.empty((RJ1, time))
     Ldyn[:, 0] = L0
-    for t in range(time - 2):
+    Ldyn[:, 1] = mu_baseline_first.T @ L0
+    for t in range(1, time - 2):
         Ldyn[:, t + 1] = mu_path[..., t].T @ Ldyn[:, t]
     Ldyn[:, time - 1] = 0.0
     return Ldyn.reshape(J + 1, R, time, order="F")
@@ -150,7 +160,9 @@ def compute_counterfactual_economy(
     mu_cf = Ldyn = realwages = rwage_us = None
     for outer in range(1, max_outer_iter + 1):
         mu_cf = compute_mu_path_cf(mu_baseline, V)
-        Ldyn = _evolve_labor_forward(mu_cf, L0, J=J, R=R)
+        Ldyn = _evolve_labor_forward_cf(
+            mu_cf, mu_baseline[..., 0], L0, J=J, R=R,
+        )
         realwages, _ = _inner_equilibrium_path_cf(
             Ldyn, base_year, baseline_econ, A_hat_path, raw,
             time=time, tol=tol, vfactor=vfactor, maxit=maxit,

@@ -64,6 +64,8 @@ sweep = regional_sweep(verbose=True)
 print(sweep.as_dataframe().round(4))
 ```
 
+Each row of the sweep table is the response of an aggregate outcome (TFP / GDP / welfare) to a standardized 10% TFP shock applied to that region (or sector) alone. The elasticity is `(aggregate_hat − 1) / (shock_size − 1)`, so 0.5 means "10% local shock moved the aggregate by 5%." Values above 1 indicate trade and input-output linkages amplify the shock past the region's mechanical GDP weight; values below the region's GDP share mean partial absorption. See DATA.md for the formal definition.
+
 ## Project layout
 
 ```

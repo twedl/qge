@@ -266,3 +266,22 @@ result = compute_baseline(raw=raw)               # everything below derives from
 ```
 
 `load_inputs` does the long-form → ndarray conversion, fills out `RawInputs` (including labels), and runs `_validate`. Once `raw` is built, the model itself doesn't know it's looking at Canadian data — labels propagate through to every `BenchmarkResult` / `BenchmarkShockResult` / `*SweepResult` and the DataFrame helpers (`.regional_summary()`, `.as_dataframe()`, etc.) display them.
+
+## Reading sweep elasticities
+
+`regional_sweep(raw=raw)` and `sectoral_sweep(raw=raw)` shock each region (or sector) one at a time with a standardized 10% TFP boost, solve the new equilibrium, and record three aggregate responses per shock. The resulting table has one row per region or sector and three elasticity columns:
+
+| column | definition | reads as |
+|---|---|---|
+| `TFP_elasticity` | `(aggregate_TFP_hat − 1) / (shock_size − 1)` | "% change in world TFP per 1% local TFP boost" |
+| `GDP_elasticity` | `(aggregate_GDP_hat − 1) / (shock_size − 1)` | same for real GDP |
+| `welfare_elasticity` | `(aggregate_welfare_hat − 1) / (shock_size − 1)` | same for real consumption per worker (Cobb-Douglas) |
+
+For the standard 10% shock (`shock_size = 1.10`) the denominator is fixed at 0.10, so the elasticity is just the aggregate's percentage response divided by 10.
+
+**Interpretation by magnitude:**
+- *Below the region's GDP share* — the rest of the economy partly absorbed the shock via trade reallocation (cheaper local goods crowd out output elsewhere on the margin).
+- *Around the region's GDP share* — roughly unitary pass-through.
+- *Above 1* — input-output and trade linkages amplify the local shock beyond mechanical accounting weight. A 10% Ontario TFP boost that produces GDP elasticity ≈ 1.4 means Canadian + ROW aggregate GDP rose by ~14% — Ontario-produced intermediates and consumption goods feed productivity gains everywhere downstream.
+
+The sweep is the model's answer to "where would a one-time productivity boost have the largest aggregate payoff." Diagonal-only — each row holds the rest of the world fixed at baseline and shocks the named region (or sector) in isolation.

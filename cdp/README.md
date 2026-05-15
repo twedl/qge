@@ -8,11 +8,11 @@ Reference: [Lorenzo Caliendo · CDP research](https://sites.google.com/site/lore
 
 - **Phase 1 — Base_Year (static initial 2000 equilibrium) is done.** Verified against `Base_year.mat` to solver tolerance (~1e-7).
 - **Phase 2a — Step 1 data construction is done.** Quarterly interpolation of yearly bilateral trade, μ-driven labor evolution, value-added and wage time series. Verified against `Baseline_2000_2007_economy_actual_data.mat` to machine epsilon.
+- **Phase 2b — Step 2 dynamic baseline 2000-2007 is done.** 28 quarter-by-quarter temporary-equilibrium solves with data-target factor prices and trade shares. Verified against `Baseline_2000_2007_economy_actual.mat` (rtol=1e-4 absorbing accumulated solver-tolerance round-off).
 
-24 tests pass.
+27 tests pass.
 
 Remaining phases:
-- **Phase 2b** — Step 2 dynamic baseline solver (28 quarter-by-quarter temporary equilibria; uses `solve_tvf.m`)
 - **Phase 2c** — Step 3 forward simulation from 2007 with constant fundamentals
 - **Phase 2d** — Step 4 stitch (combine 2a-2c into the full dynamic baseline)
 - **Phase 3** — counterfactual with China-shock removed
@@ -67,7 +67,10 @@ cdp/
 │   ├── io.py                          # RawInputs, load_inputs, data.m transformations
 │   ├── helpers.py                     # P_h_om, Dinprime, expenditurenew, GMCnew
 │   ├── dynamic.py                     # Step 1 quarterly series + LMC
-│   └── models/base_year.py            # solvewnew, compute_baseline
+│   ├── dynamic_helpers.py             # P_h_om_tvf, Dinprime_tvf
+│   └── models/
+│       ├── base_year.py               # solvewnew, compute_baseline
+│       └── dynamic_baseline.py        # solve_tvf, compute_dynamic_baseline_2000_2007
 ├── data/inputs/cdp_2000/              # 6 parquet files
 ├── scripts/convert_cdp_txt.py         # .txt → parquet converter
 ├── tests/                             # 18 tests

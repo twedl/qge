@@ -6,8 +6,6 @@ Source layout (MATLAB convention from Caliendo-Dvorkin-Parro 2019):
                                 rows 0..86 are destination for sector 1,
                                 87..173 for sector 2, etc. Columns are sources.
   gamma.txt        (87, 22)    Region × sector. Value-added share of gross output.
-  gamma_us.txt     (22, 1)     US-only value-added share (sector). Not used here —
-                                gamma.txt already carries the US column.
   IO_tables.txt    (836, 22)   (38 region blocks × 22 source sectors, 22 dest sectors).
                                 First 22 rows = US IO, next 37 × 22 = foreign IO.
   GO.txt           (87, 22)    Region × sector. Gross output.
@@ -109,10 +107,6 @@ N = R + C  # 87
 
 def _read_matrix(path: Path, expected_shape: tuple[int, ...]) -> np.ndarray:
     arr = np.loadtxt(path)
-    if arr.ndim == 1 and len(expected_shape) == 1:
-        if arr.shape != expected_shape:
-            raise ValueError(f"{path.name}: expected {expected_shape}, got {arr.shape}")
-        return arr
     if arr.shape != expected_shape:
         raise ValueError(f"{path.name}: expected {expected_shape}, got {arr.shape}")
     return arr
@@ -136,18 +130,19 @@ def load_raw_txt(src: Path) -> dict[str, np.ndarray]:
 def _array_to_long(
     arr: np.ndarray, dim_labels: tuple[tuple[str, tuple[str, ...]], ...]
 ) -> pd.DataFrame:
-    """N-D numpy array → long form (one row per cell)."""
+    """N-D numpy array → long form (one row per cell). Vectorized via
+    ``np.indices`` — for a (22, 87, 87) bilateral trade tensor this is
+    ~100× faster than the obvious nditer + per-row-dict loop."""
     expected = tuple(len(lbls) for _, lbls in dim_labels)
     if arr.shape != expected:
         raise ValueError(f"shape mismatch: {arr.shape} vs {expected}")
-    flat = []
-    it = np.nditer(arr, flags=["multi_index"])
-    while not it.finished:
-        row = {name: lbls[it.multi_index[i]] for i, (name, lbls) in enumerate(dim_labels)}
-        row["value"] = float(it[0])
-        flat.append(row)
-        it.iternext()
-    return pd.DataFrame(flat)
+    idx = np.indices(arr.shape).reshape(arr.ndim, -1)
+    cols = {
+        name: np.asarray(labels)[idx[i]]
+        for i, (name, labels) in enumerate(dim_labels)
+    }
+    cols["value"] = arr.ravel()
+    return pd.DataFrame(cols)
 
 
 def build_bilateral_trade(xbilat: np.ndarray, GO: np.ndarray) -> pd.DataFrame:
@@ -159,35 +154,21 @@ def build_bilateral_trade(xbilat: np.ndarray, GO: np.ndarray) -> pd.DataFrame:
     Here we precompute the completed matrix so the parquet stores a
     self-contained xbilat.
     """
+    # xbilat[j*N + n_dest, n_source] = flow from n_source to n_dest in
+    # sector j (README: "Columns are the source countries and rows are the
+    # destination countries"). E[j, n] from data.m = total sales by source n
+    # in sector j = sum across destinations of xbilat[j*N + dest, n].
     xbilat = xbilat.copy()
-    # Per-sector totals from xbilat: E[j, n] = sum over source m of xbilat[j*N+m, n]
-    # In the raw xbilat the destinations are columns and sources are rows
-    # within each sector block? Actually MATLAB indexes (source, destination)
-    # as rows × columns but the README says "Columns are the source countries
-    # and rows are the destination countries". So:
-    #   xbilat[j*N + n_dest, n_source] = flow from n_source to n_dest in sector j.
-    GO_T = GO.T  # (J, N) — sector × region
-    E = np.zeros((J, N))
-    for j in range(J):
-        # Sum across source columns: gives total inflow to each destination.
-        # Wait — that's expenditure-side. We want gross output (= sum to all
-        # destinations from a given source). For symmetric purposes
-        # E[j, n] in data.m is "sum(xbilat(1+N*(j-1):N*j, n))" — fix one
-        # source column n, sum over destinations (rows in that source's
-        # column). That is total sales of sector j produced by source n.
-        # So GO[n, j] should equal sum of source n's column for sector j.
-        E[j, :] = xbilat[j * N:(j + 1) * N, :].sum(axis=0)
-    # For non-tradable sectors in US states, fill in own-state domestic
-    # sales: x[j, source=state, dest=state] = GO[state, j] - sum of any
-    # existing flows out of that state (which should be ~0 for non-tradables).
-    DS = GO_T[N_TRADABLES:, :R] - E[N_TRADABLES:, :R]  # (JNT, R)
-    for j_nt in range(J - N_TRADABLES):
-        j = N_TRADABLES + j_nt
-        for state_idx in range(R):
-            # The diagonal: source=state_idx, destination=state_idx
-            xbilat[j * N + state_idx, state_idx] = DS[j_nt, state_idx]
+    xbilat_3d = xbilat.reshape(J, N, N)         # (sector, dest, source)
+    E = xbilat_3d.sum(axis=1)                    # (sector, source)
+    # The raw xbilat zeros the own-state diagonal for non-tradable US-state
+    # sectors; fill from GO so the saved parquet is self-contained.
+    DS = GO.T[N_TRADABLES:, :R] - E[N_TRADABLES:, :R]      # (JNT, R)
+    states = np.arange(R)
+    for j_nt, j in enumerate(range(N_TRADABLES, J)):
+        xbilat_3d[j, states, states] = DS[j_nt, states]
     return _array_to_long(
-        xbilat.reshape(J, N, N),
+        xbilat_3d,
         (("sector", SECTORS), ("destination", REGIONS), ("source", REGIONS)),
     )
 

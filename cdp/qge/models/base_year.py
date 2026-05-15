@@ -63,7 +63,7 @@ def solvewnew(
         # Price index given current om
         phat, c = P_h_om(
             om, kappa_hat, lambda_hat, raw.T,
-            raw.B, raw.G, raw.gamma, raw.Din,
+            raw.G, raw.gamma, raw.Din,
             J, N, maxit=int(1e10), tol=1e-10,
         )
 

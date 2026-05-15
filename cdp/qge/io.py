@@ -18,6 +18,12 @@ import pandas as pd
 
 INPUTS_ROOT = Path(__file__).resolve().parent.parent / "data" / "inputs"
 
+# Fixed in this calibration: 50 US states sit at the front of the region
+# vector, followed by 37 foreign countries. The IO blocks layout puts the
+# US block at index 0 and country k at index k + 1 (one shared US block
+# for all 50 states + 37 individual foreign blocks = 38 blocks total).
+N_US_STATES = 50
+
 
 @dataclass(frozen=True)
 class RawInputs:
@@ -78,7 +84,7 @@ class RawInputs:
 
     @property
     def R(self) -> int:
-        return 50  # CDP fixed number of US states
+        return N_US_STATES
 
 
 # ---------------------------------------------------------------- loader
@@ -109,80 +115,47 @@ def load_inputs(directory: Path = INPUTS_ROOT / "cdp_2000") -> RawInputs:
     regions = tuple(pd.unique(gamma_df["region"]))
     countries = tuple(pd.unique(io_df["country"]))
     J, N = len(sectors), len(regions)
-    R = 50  # fixed for CDP
+    R = N_US_STATES
 
-    # xbilat (J, N_dest, N_source) → flatten to (J*N, N)
     xbilat_3d = _long_to_array(
         trade, ("sector", "destination", "source"),
         {"sector": sectors, "destination": regions, "source": regions},
     )
     xbilat = xbilat_3d.reshape(J * N, N)
 
-    # gamma (J, N)
     gamma = _long_to_array(
         gamma_df, ("sector", "region"),
         {"sector": sectors, "region": regions},
     )
 
-    # B (J, N): replicate the (N,) structures share across J sector rows
-    B_vec = _long_to_array(
-        B_df.assign(_dummy="x"), ("region",),
-        {"region": regions},
-    )
+    B_vec = _long_to_array(B_df, ("region",), {"region": regions})
     B = np.tile(B_vec, (J, 1))
 
-    # IO blocks (38, J, J): one block per country (US + 37 foreign)
     io_blocks = _long_to_array(
         io_df, ("country", "source_sector", "dest_sector"),
         {"country": countries, "source_sector": sectors, "dest_sector": sectors},
     )
-    # Broadcast: 50 US states share the US block (countries[0]).
-    IO = np.empty((J * N, J))
-    for n in range(N):
-        block_idx = 0 if n < R else (n - R + 1)
-        IO[n * J:(n + 1) * J, :] = io_blocks[block_idx]
+    # Map each region to its IO block: US states share index 0; foreign
+    # country k (region R + k) maps to block k + 1.
+    block_idx = np.concatenate([np.zeros(R, dtype=int), np.arange(1, N - R + 1)])
+    IO_3d = io_blocks[block_idx]                                        # (N, J, J)
+    G_3d = (1 - gamma.T)[:, None, :] * IO_3d                            # (N, J, J)
+    G = G_3d.reshape(N * J, J)
 
-    # G[n*J + i, k] = (1 - γ[k, n]) · IO[n*J + i, k]
-    G = np.empty_like(IO)
-    for n in range(N):
-        G[n * J:(n + 1) * J, :] = (1 - gamma[:, n])[None, :] * IO[n * J:(n + 1) * J, :]
+    GO_check = xbilat_3d.sum(axis=1)                                    # (J, N)
 
-    # Non-tradable US-state diagonal fill is baked into the parquet
-    # already (convert_cdp_txt.build_bilateral_trade). Verify GO consistency.
-    GO_target = _long_to_array(
-        go_df, ("sector", "region"),
-        {"sector": sectors, "region": regions},
-    )
-    GO_check = np.zeros((J, N))
-    for j in range(J):
-        GO_check[j, :] = xbilat[j * N:(j + 1) * N, :].sum(axis=0)
-
-    # Din
     row_sums = xbilat.sum(axis=1, keepdims=True)
     Din = np.where(row_sums > 0, xbilat / np.maximum(row_sums, 1e-30), 0.0)
 
-    # Aggregate deficits Bn = sum_j (exports[j, n] − imports[j, n])
-    Bn = np.zeros(N)
-    for j in range(J):
-        block = xbilat[j * N:(j + 1) * N, :]
-        M = block.sum(axis=1)        # imports to each dest in sector j
-        E = block.sum(axis=0)        # exports from each source in sector j
-        Bn += E - M
+    exports = xbilat_3d.sum(axis=1)                                     # (J, N) by source
+    imports = xbilat_3d.sum(axis=2)                                     # (J, N) by destination
+    Bn = (exports - imports).sum(axis=0)
+    X0 = imports                                                         # alias for clarity
 
-    # X0[j, n] = sum_m xbilat[j, n, m] (sum over sources → expenditure at n)
-    X0 = np.zeros((J, N))
-    for j in range(J):
-        X0[j, :] = xbilat[j * N:(j + 1) * N, :].sum(axis=1)
-
-    # Total expenditure (sector, destination) flattened row-major. The
-    # MATLAB reshape(X0', 1, J*N) is X0' read column-major = X0 read
-    # row-major, so PQ_vec[j*N + n_dest] = X0[j, n_dest].
-    PQ_vec = X0.flatten()
-    Exjn0 = np.zeros((J, N))
-    for n in range(N):
-        DP0 = Din[:, n] * PQ_vec
-        for j in range(J):
-            Exjn0[j, n] = DP0[j * N:(j + 1) * N].sum()
+    # Exjn0[j, n] = sum_m Din[j*N + m, n] · X0[j, m]
+    # (the data.m loop with PQ_vec[j*N + n_dest] = X0[j, n_dest])
+    Din_3d = Din.reshape(J, N, N)
+    Exjn0 = np.einsum("jmn,jm->jn", Din_3d, X0)
 
     VALjn0 = gamma * (1 - B) * Exjn0
     VARjn0 = (B / (1 - B)) * VALjn0
@@ -193,17 +166,11 @@ def load_inputs(directory: Path = INPUTS_ROOT / "cdp_2000") -> RawInputs:
     # Final-demand share α. CDP's data.m makes α region-invariant: the
     # sector-wise residual (X0 - intermediate uses) summed across regions
     # is divided by the total of (VA - Bn), then tiled across regions.
-    aux2 = np.zeros((J, N))
-    for n in range(N):
-        G_n = G[n * J:(n + 1) * J, :]  # (J, J)
-        # E[:, n] in data.m is the (J,) vector of column sums of xbilat for source n
-        E_n = np.zeros(J)
-        for j in range(J):
-            E_n[j] = xbilat[j * N:(j + 1) * N, n].sum()
-        aux2[:, n] = X0[:, n] - G_n @ E_n
-    sector_total = aux2.sum(axis=1)               # (J,)
-    total_va_minus_def = (VA - Bn).sum()
-    alphas = np.tile((sector_total / total_va_minus_def)[:, None], (1, N))
+    # G_3d[n, source, dest] · exports[dest, n] summed over dest → intermediate
+    # use of source-sector input in region n.
+    aux2 = X0 - np.einsum("nsd,dn->sn", G_3d, exports)
+    sector_total = aux2.sum(axis=1)
+    alphas = np.tile((sector_total / (VA - Bn).sum())[:, None], (1, N))
 
     # Iotas — make Sn ≡ 0 at baseline by construction
     Chi = VAR.sum()

@@ -1,8 +1,8 @@
 """Per-iteration math for the CDP Base_Year solver.
 
-Direct ports of P_h_om.m, Dinprime.m, expenditurenew.m, GMCnew.m. Each
-function mirrors its MATLAB counterpart in indexing conventions; see the
-module-level note on the trailing dimension order.
+Direct ports of P_h_om.m, Dinprime.m, expenditurenew.m, GMCnew.m. The
+MATLAB code's per-region Python loops are vectorized via reshape and
+einsum without altering numerics.
 
 Array conventions (matching the MATLAB code):
 * ``J`` sectors, ``N`` regions, ``R`` of which are US states (first ``R``).
@@ -18,12 +18,16 @@ from __future__ import annotations
 import numpy as np
 
 
+def _inv_theta_per_jn(T: np.ndarray, N: int) -> np.ndarray:
+    """(J*N, 1) column of 1/θ_j repeated N times — for kappa_hat ** (-1/T)."""
+    return np.repeat(T.ravel(), N).reshape(-1, 1)
+
+
 def P_h_om(
     om: np.ndarray,
     kappa_hat: np.ndarray,
     lambda_hat: np.ndarray,
     T: np.ndarray,
-    B: np.ndarray,
     G: np.ndarray,
     gamma: np.ndarray,
     Din: np.ndarray,
@@ -36,33 +40,25 @@ def P_h_om(
 
     Returns (phat, c) with shapes (J, N), (J, N).
     """
+    G_3d = G.reshape(N, J, J)                            # [n, source, dest]
+    Din_k = Din * (kappa_hat ** (-1.0 / _inv_theta_per_jn(T, N)))
+    Din_k_3d = Din_k.reshape(J, N, N)                    # [j, dest, source]
+    T_col = T.reshape(-1, 1)
+
     pf0 = np.ones((J, N))
     pfmax = 1.0
     it = 1
     while it <= maxit and pfmax > tol:
-        lom = np.log(om)
-        lp = np.log(pf0)
-        # Input bundle cost: log c_jn = γ_jn log ω_jn + G_n^T log p_n
-        lc = np.empty((J, N))
-        for i in range(N):
-            G_i = G[i * J:(i + 1) * J, :]  # (J, J): rows = source sec, cols = dest sec
-            lc[:, i] = gamma[:, i] * lom[:, i] + G_i.T @ lp[:, i]
+        # log c_{k,n} = γ_{k,n} log ω_{k,n} + Σ_s G_{n,s,k} log p_{s,n}
+        lc = gamma * np.log(om) + np.einsum("nsk,sn->kn", G_3d, np.log(pf0))
         c = np.exp(lc)
 
-        # Reshape theta vector into LT of length J*N.
-        LT = np.repeat(T.ravel(), N).reshape(-1, 1)  # (J*N, 1)
-        Din_k = Din * (kappa_hat ** (-1.0 / LT))
+        # phat_{j,d} = (Σ_m Din_k_{j,d,m} · λ_{j,m}^(γ/θ) · c_{j,m}^(-1/θ))^(-θ_j)
+        adjusted = (lambda_hat ** (gamma / T_col)) * (c ** (-1.0 / T_col))
+        phat = np.einsum("jdm,jm->jd", Din_k_3d, adjusted) ** (-T_col)
 
-        phat = np.empty((J, N))
-        for j in range(J):
-            block = Din_k[j * N:(j + 1) * N, :]  # (N, N)
-            inner = (lambda_hat[j, :] ** (gamma[j, :] / T[j])) * (c[j, :] ** (-1.0 / T[j]))
-            # phat[j, n] = (sum over source m of block[n, m] * inner[m]) ^ (-T[j])
-            phat[j, :] = (block @ inner) ** (-T[j])
-
-        pfdev = np.abs(phat - pf0)
+        pfmax = float(np.abs(phat - pf0).max())
         pf0 = phat
-        pfmax = pfdev.max()
         it += 1
     return pf0, c
 
@@ -79,24 +75,17 @@ def Dinprime(
     gamma: np.ndarray,
 ) -> np.ndarray:
     """New bilateral trade shares given factor prices and goods prices."""
-    LT = np.repeat(T.ravel(), N).reshape(-1, 1)
-    cp = c ** (-1.0 / T.reshape(-1, 1))         # (J, N)
-    phatp = phat ** (-1.0 / T.reshape(-1, 1))   # (J, N)
+    T_col = T.reshape(-1, 1)
+    cp = c ** (-1.0 / T_col)         # (J, N)
+    phatp = phat ** (-1.0 / T_col)   # (J, N)
 
-    Din_k = Din * (kappa_hat ** (-1.0 / LT))
+    Din_k = Din * (kappa_hat ** (-1.0 / _inv_theta_per_jn(T, N)))
 
-    # DD[j*N + dest, source] = Din_k[j*N + dest, source]
-    #                          · cp[j, source] · lambda_hat[j, source]^(γ/θ)
-    # — the per-source adjustment is constant across destinations.
-    DD = Din_k * np.kron(
-        cp * (lambda_hat ** (gamma / T.reshape(-1, 1))),
-        np.ones((N, 1)),
-    )
-    # Dinp[j*N + dest, source] = DD[...] / phatp[j, dest]
-    # — denominator is the destination-side price index for sector j,
-    # constant across sources. phatp.ravel()[j*N + dest] = phatp[j, dest].
-    Dinp = DD / phatp.ravel()[:, None]
-    return Dinp
+    # DD[j*N + dest, source] = Din_k[..] · cp[j, source] · λ_{j,source}^(γ/θ)
+    # — per-source adjustment, constant across destinations.
+    DD = Din_k * np.kron(cp * (lambda_hat ** (gamma / T_col)), np.ones((N, 1)))
+    # Normalize by the destination-side price index (constant across sources).
+    return DD / phatp.ravel()[:, None]
 
 
 def expenditurenew(
@@ -113,27 +102,25 @@ def expenditurenew(
     VALjn0: np.ndarray,
     io: np.ndarray,
 ) -> np.ndarray:
-    """Solve the linear system (I - Ω) X = α (income − deficits) for total expenditure."""
+    """Solve (I − Ω) X = α (income − deficits) for total expenditure."""
     VARjnp = VARjn0 * om * (Ljn_hat ** (1 - B))
-    VARp = VARjnp.sum(axis=0)             # (N,)
+    VARp = VARjnp.sum(axis=0)
     Chip = VARp.sum()
     Bnp = Snp.ravel() - io.ravel() * Chip + VARp
 
-    # NBP[j, n*J + k] = Dinp[k*N + n, j]: rearrange (J*N, N) → (N, N*J)
-    NBP = np.zeros((N, J * N))
-    for j_row in range(N):  # MATLAB "for j = 1:N" but indexes destinations
-        for n in range(N):
-            NBP[j_row, n * J:(n + 1) * J] = Dinp[n::N, j_row]
+    # NBP[source, n*J + k] = Dinp_3d[k, n, source]: regroup Dinp axes so
+    # the per-source-per-region trade share for sector k sits contiguously.
+    Dinp_3d = Dinp.reshape(J, N, N)                                # [k, n, source]
+    NBP = Dinp_3d.transpose(2, 1, 0).reshape(N, N * J)
     NNBP = np.kron(NBP, np.ones((J, 1)))
     GG = np.kron(np.ones((1, N)), G)
-    GP = GG * NNBP
+    OM = np.eye(J * N) - GG * NNBP
 
-    OM = np.eye(J * N) - GP
-    aux = (om * (Ljn_hat ** (1 - B)) * (VARjn0 + VALjn0)).sum(axis=0) - Bnp  # (N,)
-    aux2 = np.kron(aux, np.ones(J))  # (J*N,)
+    aux = (om * (Ljn_hat ** (1 - B)) * (VARjn0 + VALjn0)).sum(axis=0) - Bnp
+    aux2 = np.kron(aux, np.ones(J))
     rhs = alphas.flatten("F") * aux2  # MATLAB reshape(alphas, N*J, 1) is column-major
     X = np.linalg.solve(OM, rhs)
-    return X.reshape(N, J).T  # → (J, N)
+    return X.reshape(N, J).T
 
 
 def GMCnew(
@@ -154,14 +141,11 @@ def GMCnew(
     get a single national wage that's identical across sectors.
     """
     # MATLAB reshape(Xp', 1, J*N) is row-major on Xp (sector outer, dest inner).
-    PQ_vec = Xp.flatten()
-    DP = Dinp * PQ_vec[:, None]  # (J*N, N): per-(sector, dest, source) flow
-    Exjnp = np.empty((J, N))
-    for j in range(J):
-        Exjnp[j, :] = DP[j * N:(j + 1) * N, :].sum(axis=0)
+    DP = Dinp * Xp.flatten()[:, None]                              # (J*N, N)
+    Exjnp = DP.reshape(J, N, N).sum(axis=1)                         # (J, N) by source
 
     aux4 = gamma * Exjnp
-    omef0 = np.ones((J, N))
+    omef0 = np.empty((J, N))
     omef0[:, :R] = aux4[:, :R] / (
         (Ljn_hat[:, :R] ** (1 - B[:, :R])) * (VARjn0[:, :R] + VALjn0[:, :R])
     )
@@ -169,5 +153,5 @@ def GMCnew(
     VAR = VARjn0.sum(axis=0)
     VAL = VALjn0.sum(axis=0)
     aux5 = aux4.sum(axis=0)
-    omef0[:, R:] = np.broadcast_to(aux5[R:] / (VAR[R:] + VAL[R:]), (J, N - R))
+    omef0[:, R:] = (aux5[R:] / (VAR[R:] + VAL[R:]))[None, :]
     return omef0

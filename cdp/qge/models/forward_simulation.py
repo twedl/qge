@@ -31,7 +31,7 @@ import numpy as np
 
 from qge.dynamic import QuarterlySeries, build_quarterly_series
 from qge.forward_dynamics import (
-    BETA, NU, bellman_update_Y, compute_mu_path, evolve_labor_forward,
+    bellman_update_Y, compute_mu_path, evolve_labor_forward,
 )
 from qge.io import RawInputs, load_inputs
 from qge.models.base_year import EquilibriumResult, compute_baseline
@@ -40,8 +40,9 @@ from qge.models.dynamic_baseline import (
 )
 
 
-DEFAULT_FORWARD_TIME = 200       # quarters in the forward simulation
-DEFAULT_OUTER_TOL = 1e-3         # toldyn in the MATLAB code
+DEFAULT_FORWARD_TIME = 200            # quarters in the forward simulation
+DEFAULT_OUTER_TOL = 1e-3              # toldyn in the MATLAB code
+DEFAULT_MAX_OUTER_ITER = 50           # generous; empirical convergence is ~1-10 iters
 
 
 @dataclass(frozen=True)
@@ -88,9 +89,9 @@ def _inner_equilibrium_path(
     A_hat = np.ones((J, N))
     Snp = np.zeros(N)
     om_seed = np.ones((J, N))                  # MATLAB resets om = ones each period
+    Ljn_hat = np.ones((J, N))                  # reuse across periods; only US block changes
 
     for t in range(time - 2):
-        Ljn_hat = np.ones((J, N))
         Ljn_hat[:, :R] = Ltemp[:, :, t + 1] / Ltemp[:, :, t]
         Ljn_hat0[:, :, t + 1] = Ljn_hat
 
@@ -123,7 +124,7 @@ def compute_baseline_forward_2007(
     *,
     time: int = DEFAULT_FORWARD_TIME,
     outer_tol: float = DEFAULT_OUTER_TOL,
-    max_outer_iter: int = 50,
+    max_outer_iter: int = DEFAULT_MAX_OUTER_ITER,
     tol: float = 1e-7,
     vfactor: float = -0.05,
     maxit: int = int(1e6),

@@ -35,12 +35,13 @@ def compute_mu_path(
         mu[t][i, k] ∝ mu[t-1][i, k] · Yt[k, t+1]^β
 
     with ``mu[0][i, k] ∝ mu_init[i, k] · Yt[k, 1]^β`` and row-sum
-    normalization.
+    normalization. The last slice is left as a carry-forward of the
+    previous (the MATLAB reference leaves it at zeros; both conventions
+    are unused downstream because consumers index ``[..., :-1]``).
     """
     RJ1, time = Yt.shape
     mu = np.empty((RJ1, RJ1, time))
 
-    # mu[0] uses the Phase 2a boundary and Yt at t = 1.
     num = mu_init * (Yt[:, 1] ** beta)[None, :]
     mu[..., 0] = num / num.sum(axis=1, keepdims=True)
 
@@ -48,7 +49,6 @@ def compute_mu_path(
         num = mu[..., t] * (Yt[:, t + 2] ** beta)[None, :]
         mu[..., t + 1] = num / num.sum(axis=1, keepdims=True)
 
-    # Last slice left as the carry-forward of the previous iteration.
     mu[..., time - 1] = mu[..., time - 2]
     return mu
 
@@ -82,28 +82,27 @@ def bellman_update_Y(
 
         Y_new[i, t] = Σ_k μ[t-1][i, k] · rw[k, t]^(1/ν) · Yt[k, t+1]^β
 
-    for US labor markets (the non-employment row at index 0 in each
-    state's block is treated as rw = 1). Foreign countries are not
-    workers in this model, so the update is US-only.
+    for ``t = 1..time-2``; ``Y_new[:, 0] = 0`` (the boundary lookback
+    has no μ predecessor) and ``Y_new[:, -1] = 1`` (the steady-state
+    terminal). Foreign countries are not workers, so the update is
+    US-only — we pad the non-employment row with ones.
+
+    Computed in one einsum over the k axis so the (RJ1, RJ1, time)
+    tensor never materializes — peak memory stays at the (RJ1, time-2)
+    weights array (~1.8 MB) instead of two (RJ1, RJ1, time) ones (~4.2 GB).
     """
     RJ1, time = Yt.shape
 
-    # Pad realwages with a non-employment "row 0" of ones, US states only.
     realwages_padded = np.ones((J + 1, R, time))
     realwages_padded[1:, :, :] = realwages[:, :R, :]
-    # Reshape to (RJ1, time) with the same Fortran ordering as labor flow.
     rw_us = realwages_padded.reshape(RJ1, time, order="F")
+    rwnu_per_k = rw_us ** (1.0 / nu)
 
-    # rwagenu[i, k, t] = μ[t-1][i, k] · rw[k, t]^(1/ν), for t >= 1.
-    rwnu_per_k = rw_us ** (1.0 / nu)                          # (RJ1, time)
-    rwagenu = np.zeros((RJ1, RJ1, time))
-    rwagenu[..., 1:] = mu_path[..., :-1] * rwnu_per_k[None, :, 1:]
-
-    # num[i, k, t] = rwagenu[i, k, t] · Yt[k, t+1]^β
-    num = np.zeros_like(rwagenu)
-    for t in range(time - 1):
-        num[..., t] = rwagenu[..., t] * (Yt[:, t + 1] ** beta)[None, :]
-
-    Y_new = num.sum(axis=1)                                   # (RJ1, time)
+    # weights[k, s] = rwnu_per_k[k, s+1] · Yt[k, s+2]^β for s = 0..time-3.
+    weights = rwnu_per_k[:, 1:time - 1] * (Yt[:, 2:time] ** beta)
+    Y_new = np.zeros((RJ1, time))
+    Y_new[:, 1:time - 1] = np.einsum(
+        "iks,ks->is", mu_path[..., :time - 2], weights,
+    )
     Y_new[:, -1] = 1.0
     return Y_new

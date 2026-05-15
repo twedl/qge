@@ -17,9 +17,7 @@ import pytest
 from scipy.io import loadmat
 
 from qge.dynamic import build_quarterly_series
-from qge.forward_dynamics import (
-    BETA, NU, bellman_update_Y, compute_mu_path, evolve_labor_forward,
-)
+from qge.forward_dynamics import compute_mu_path
 from qge.models.dynamic_baseline import compute_dynamic_baseline_2000_2007
 from qge.models.forward_simulation import compute_baseline_forward_2007
 
@@ -96,20 +94,20 @@ def step3_python(raw, baseline, quarterly, step3_fixture):
     # saved mu, pi, wages from the pre-averaging Yt_prev while saving
     # Hvectnoshock as the post-averaging value. Seeding our run with the
     # saved Hvectnoshock produces close but not bit-identical numbers.
-    "attr, mat_key, rtol, atol",
+    "attr, rtol, atol",
     [
-        ("Hvectnoshock", "Hvectnoshock", 5e-3, 1e-3),
-        ("pi_baseline",  "pi_baseline",  5e-3, 1e-3),
-        ("wages0",       "wages0",       5e-3, 1e-3),
-        ("Ljn_hat0",     "Ljn_hat0",     5e-3, 1e-3),
+        ("Hvectnoshock", 5e-3, 1e-3),
+        ("pi_baseline",  5e-3, 1e-3),
+        ("wages0",       5e-3, 1e-3),
+        ("Ljn_hat0",     5e-3, 1e-3),
     ],
     ids=["Hvect", "pi", "wages", "Ljn_hat"],
 )
 def test_forward_simulation_matches_matlab(
-    step3_python, step3_fixture, attr, mat_key, rtol, atol
+    step3_python, step3_fixture, attr, rtol, atol
 ):
     actual = getattr(step3_python, attr)
-    expected = np.squeeze(step3_fixture[mat_key])
+    expected = np.squeeze(step3_fixture[attr])
     np.testing.assert_allclose(actual, expected, rtol=rtol, atol=atol)
 
 

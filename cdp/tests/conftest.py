@@ -26,6 +26,16 @@ def baseline(raw):
 
 
 @pytest.fixture(scope="session")
+def quarterly(raw, baseline):
+    """Phase 2a quarterly series shared across test modules."""
+    from qge.dynamic import build_quarterly_series
+    rep_dir = REPO_ROOT / "CDP replication files" / "time_varying_fundamentals" / "Baseline_economy"
+    if not rep_dir.exists():
+        pytest.skip(f"CDP replication kit not present: {rep_dir}")
+    return build_quarterly_series(rep_dir, baseline, raw.gamma, raw.B)
+
+
+@pytest.fixture(scope="session")
 def matlab_baseline():
     """Load the MATLAB Base_year.mat workspace. Skip if not on disk."""
     if not MAT_FIXTURE.exists():

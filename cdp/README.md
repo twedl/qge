@@ -10,11 +10,11 @@ Reference: [Lorenzo Caliendo · CDP research](https://sites.google.com/site/lore
 - **Phase 2a — Step 1 data construction is done.** Quarterly interpolation of yearly bilateral trade, μ-driven labor evolution, value-added and wage time series. Verified against `Baseline_2000_2007_economy_actual_data.mat` to machine epsilon.
 - **Phase 2b — Step 2 dynamic baseline 2000-2007 is done.** 28 quarter-by-quarter temporary-equilibrium solves with data-target factor prices and trade shares. Verified against `Baseline_2000_2007_economy_actual.mat` (rtol=1e-4 absorbing accumulated solver-tolerance round-off).
 - **Phase 2c — Step 3 forward simulation from 2007 is done.** 200-period dynamic forward simulation with constant fundamentals, forward-looking value functions Yt, and migration flows μ derived from the Bellman recursion. Outer fixed-point on Yt converges in one iteration when seeded with the saved `Hvectnoshock`. Verified against `Baseline_2007.mat` and `Baseline_economy_2007_forward.mat` (rtol=5e-3 to 2e-2 absorbing the half-step inconsistency in the saved fixture and 200-quarter accumulation).
+- **Phase 2d — Step 4 stitch is done.** Combines Phase 2a/2b/2c outputs into a single 200-quarter baseline economy (220 transitions for μ). Pure array splicing — no new computation. Verified against `Baseline_economy.mat` (HDF5/v7.3, loaded via h5py).
 
-28 fast tests pass; the full Step 3 verification is `@pytest.mark.slow` (~10 min).
+**Phase 2 (the full dynamic baseline) is complete.** 29 fast tests pass; the full integration verification across Steps 1-4 is `@pytest.mark.slow` (~10-15 min, dominated by the 200 inner solves in Step 3).
 
-Remaining phases:
-- **Phase 2d** — Step 4 stitch (combine 2a-2c into the full dynamic baseline)
+Remaining work:
 - **Phase 3** — counterfactual with China-shock removed
 - **Phase 4** — employment / welfare effect figures
 - **Phase 5** — extensions (SSDI, persistence, CES, real home production)
@@ -72,7 +72,8 @@ cdp/
 │   └── models/
 │       ├── base_year.py               # solvewnew, compute_baseline
 │       ├── dynamic_baseline.py        # solve_tvf, compute_dynamic_baseline_2000_2007
-│       └── forward_simulation.py      # compute_baseline_forward_2007 (Step 3)
+│       ├── forward_simulation.py      # compute_baseline_forward_2007 (Step 3)
+│       └── baseline_economy.py        # stitch_baseline_economy (Step 4)
 ├── data/inputs/cdp_2000/              # 6 parquet files
 ├── scripts/convert_cdp_txt.py         # .txt → parquet converter
 ├── tests/                             # 18 tests

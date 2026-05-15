@@ -44,13 +44,6 @@ def step3_forward_fixture():
 # ---------------------------------------------------------------- primitives
 
 
-@pytest.fixture(scope="module")
-def quarterly(raw, baseline):
-    if not REP_DIR.exists():
-        pytest.skip(f"CDP replication kit not present: {REP_DIR}")
-    return build_quarterly_series(REP_DIR, baseline, raw.gamma, raw.B)
-
-
 def test_compute_mu_path_shape_and_row_stochastic(quarterly, step3_fixture):
     """compute_mu_path produces a (RJ1, RJ1, time) row-stochastic path.
 

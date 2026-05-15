@@ -8,6 +8,7 @@ dependencies = [
     "scipy>=1.13",
     "pandas>=2.0",
     "pyarrow>=15.0",
+    "h5py>=3.16.0",
 ]
 
 [dependency-groups]

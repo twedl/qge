@@ -3,7 +3,9 @@
 Reference: `Baseline_2000_2007_economy_actual_data.mat` carries the
 MATLAB output of Step_1_data.m. Each Python series should match its
 MATLAB counterpart at machine epsilon (the data construction is
-algebraic, not iterative).
+algebraic, not iterative) — the trade tensors widen the tolerance to
+rtol=1e-5 / atol=1e-3 to absorb cumulative round-off across 28
+multiplicative steps.
 """
 
 from __future__ import annotations
@@ -15,8 +17,6 @@ import pytest
 from scipy.io import loadmat
 
 from qge.dynamic import build_quarterly_series
-from qge.io import load_inputs
-from qge.models.base_year import compute_baseline
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REP_DIR = REPO_ROOT / "CDP replication files" / "time_varying_fundamentals" / "Baseline_economy"
@@ -31,51 +31,27 @@ def step1_fixture():
 
 
 @pytest.fixture(scope="module")
-def step1_python():
+def step1_python(raw, baseline):
     if not REP_DIR.exists():
         pytest.skip(f"CDP replication kit not present: {REP_DIR}")
-    raw = load_inputs()
-    baseline = compute_baseline(raw=raw, tol=1e-7, vfactor=-0.05)
     return build_quarterly_series(REP_DIR, baseline, raw.gamma, raw.B)
 
 
-def test_Din_baseline_matches(step1_python, step1_fixture):
-    np.testing.assert_allclose(
-        step1_python.Din_baseline, step1_fixture["Din_baseline"],
-        rtol=1e-5, atol=1e-7,
-    )
-
-
-def test_series_xbilat_matches(step1_python, step1_fixture):
-    np.testing.assert_allclose(
-        step1_python.series_xbilat, step1_fixture["series_xbilat"],
-        rtol=1e-5, atol=1e-3,
-    )
-
-
-def test_series_wageshat_matches(step1_python, step1_fixture):
-    np.testing.assert_allclose(
-        step1_python.series_wageshat, step1_fixture["series_wageshat"],
-        rtol=1e-5, atol=1e-7,
-    )
-
-
-def test_series_Ljn0hat_matches(step1_python, step1_fixture):
-    np.testing.assert_allclose(
-        step1_python.series_Ljn0hat, step1_fixture["series_Ljn0hat"],
-        rtol=1e-5, atol=1e-7,
-    )
-
-
-def test_series_mu_matches(step1_python, step1_fixture):
-    np.testing.assert_allclose(
-        step1_python.series_mu, step1_fixture["series_mu"],
-        rtol=1e-12, atol=0,
-    )
-
-
-def test_L0_initial_matches(step1_python, step1_fixture):
-    np.testing.assert_allclose(
-        step1_python.L0_initial, step1_fixture["L0_initial"].ravel(),
-        rtol=1e-12, atol=0,
-    )
+@pytest.mark.parametrize(
+    "attr, rtol, atol",
+    [
+        ("Din_baseline",     1e-5,  1e-7),
+        ("series_xbilat",    1e-5,  1e-3),
+        ("series_wageshat",  1e-5,  1e-7),
+        ("series_Ljn0hat",   1e-5,  1e-7),
+        ("series_mu",        1e-12, 0),
+        ("L0_initial",       1e-12, 0),
+    ],
+    ids=["Din_baseline", "xbilat", "wageshat", "Ljn0hat", "mu", "L0_initial"],
+)
+def test_quarterly_series_matches_matlab(
+    step1_python, step1_fixture, attr, rtol, atol
+):
+    actual = getattr(step1_python, attr)
+    expected = np.squeeze(step1_fixture[attr])
+    np.testing.assert_allclose(actual, expected, rtol=rtol, atol=atol)

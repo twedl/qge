@@ -13,9 +13,6 @@ the iterative solver outputs (the MATLAB solver uses tol=1e-7).
 from __future__ import annotations
 
 import numpy as np
-import pytest
-
-from qge.models.base_year import compute_baseline
 
 
 def test_data_B_matches_matlab(raw, matlab_baseline):
@@ -61,12 +58,6 @@ def test_data_io_matches_matlab(raw, matlab_baseline):
 def test_GO_check_matches(raw, matlab_baseline):
     """Recomputed gross output from xbilat row sums matches the saved GO."""
     np.testing.assert_allclose(raw.GO_check.T, matlab_baseline["GO"], rtol=1e-9, atol=1e-3)
-
-
-@pytest.fixture(scope="module")
-def baseline(raw):
-    """One end-to-end compute_baseline run shared across solver checks."""
-    return compute_baseline(raw=raw, tol=1e-7, vfactor=-0.05)
 
 
 def test_solver_om_matches_matlab(baseline, matlab_baseline):

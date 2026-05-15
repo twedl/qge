@@ -71,7 +71,7 @@ def _evolve_labor_forward(
 
 
 def _inner_equilibrium_path_cf(
-    Ldyn: np.ndarray, baseline_2007: EquilibriumResult, baseline_econ: BaselineEconomy,
+    Ldyn: np.ndarray, base_year: EquilibriumResult, baseline_econ: BaselineEconomy,
     A_hat_path: np.ndarray, raw: RawInputs,
     *, time: int, tol: float, vfactor: float, maxit: int,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -79,7 +79,10 @@ def _inner_equilibrium_path_cf(
 
     Returns ``(realwages, Ljn_hat0)``. The realwages are
     ``(wf_cf / wf_baseline) / Phat_cf`` — the counterfactual change in
-    consumption per labor market relative to baseline.
+    consumption per labor market relative to baseline. ``base_year``
+    is the **Phase 1 static 2000 baseline** (not 2007Q4): the
+    counterfactual replays the full 200-quarter path starting from the
+    2000 anchor that produced the baseline economy.
     """
     J, N, R = raw.J, raw.N, raw.R
     Ltemp = Ldyn[1:, :, :]                                # drop non-employment row
@@ -88,9 +91,9 @@ def _inner_equilibrium_path_cf(
     Ljn_hat0_baseline = np.ones((J, N, time))
     Ljn_hat0_baseline[:, :R, :] = baseline_econ.series_Ljnhat
 
-    pi = baseline_2007.Dinp.copy()
-    VARjn0 = baseline_2007.VARjnp.copy()
-    VALjn0 = baseline_2007.VALjnp.copy()
+    pi = base_year.Dinp.copy()
+    VARjn0 = base_year.VARjnp.copy()
+    VALjn0 = base_year.VALjnp.copy()
 
     realwages = np.ones((J, N, time))
     kappa_hat = np.ones((J * N, N))
@@ -120,7 +123,7 @@ def _inner_equilibrium_path_cf(
 def compute_counterfactual_economy(
     V_seed: np.ndarray,
     baseline_econ: BaselineEconomy,
-    baseline_2007: EquilibriumResult,
+    base_year: EquilibriumResult,
     raw: RawInputs | None = None,
     *,
     time: int = TOTAL_QUARTERS,
@@ -149,7 +152,7 @@ def compute_counterfactual_economy(
         mu_cf = compute_mu_path_cf(mu_baseline, V)
         Ldyn = _evolve_labor_forward(mu_cf, L0, J=J, R=R)
         realwages, _ = _inner_equilibrium_path_cf(
-            Ldyn, baseline_2007, baseline_econ, A_hat_path, raw,
+            Ldyn, base_year, baseline_econ, A_hat_path, raw,
             time=time, tol=tol, vfactor=vfactor, maxit=maxit,
         )
         rwage_us = pack_rwage_us(realwages, R=R)

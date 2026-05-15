@@ -18,11 +18,8 @@ from qge.counterfactual_dynamics import (
     CHINA_ANNUAL_TFP, CHINA_REGION_IDX, N_CHINA_SHOCK_QUARTERS,
     china_tfp_shock_path, compute_mu_path_cf,
 )
-from qge.io import load_inputs
 from qge.models.baseline_economy import BaselineEconomy
-from qge.models.base_year import EquilibriumResult
 from qge.models.counterfactual import compute_counterfactual_economy
-from qge.models.dynamic_baseline import compute_dynamic_baseline_2000_2007
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REP_DIR = REPO_ROOT / "CDP replication files" / "time_varying_fundamentals"
@@ -98,20 +95,17 @@ def cf_fixture():
 
 
 @pytest.fixture(scope="module")
-def cf_python(raw, baseline, quarterly):
+def cf_python(raw, baseline):
     if not BASELINE_MAT.exists():
         pytest.skip(f"Baseline_economy.mat not found: {BASELINE_MAT}")
     baseline_econ = _load_baseline_economy_from_mat()
-    # Need a 2007Q4 EquilibriumResult to seed the inner equilibria path —
-    # easiest is to rerun Phase 2b's last quarter (cached via session
-    # fixtures). Phase 2b's final_equilibrium gives us the right one.
-    dynamic_2007 = compute_dynamic_baseline_2000_2007(
-        raw=raw, baseline=baseline, quarterly=quarterly,
-    )
     V_seed = loadmat(str(CF_MAT))["V"]
+    # The counterfactual seeds its inner equilibrium path from the
+    # Phase 1 static base year (2000Q1) — MATLAB loads VARjn00 / VALjn00
+    # / Din00 from Base_year.mat (not from Phase 2b's 2007Q4 state).
     return compute_counterfactual_economy(
         V_seed=V_seed, baseline_econ=baseline_econ,
-        baseline_2007=dynamic_2007.final_equilibrium, raw=raw,
+        base_year=baseline, raw=raw,
         max_outer_iter=2,
     )
 

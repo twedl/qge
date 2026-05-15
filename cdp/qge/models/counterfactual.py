@@ -26,11 +26,11 @@ from dataclasses import dataclass
 import numpy as np
 
 from qge.counterfactual_dynamics import (
-    BETA, NU, bellman_update_V_cf, china_tfp_shock_path,
+    bellman_update_V_cf, china_tfp_shock_path,
     compute_mu_path_cf, pack_rwage_us,
 )
 from qge.io import RawInputs, load_inputs
-from qge.models.base_year import EquilibriumResult, compute_baseline
+from qge.models.base_year import EquilibriumResult
 from qge.models.baseline_economy import BaselineEconomy, TOTAL_QUARTERS
 from qge.models.dynamic_baseline import solve_tvf
 
@@ -84,22 +84,19 @@ def _inner_equilibrium_path_cf(
     Ldyn: np.ndarray, base_year: EquilibriumResult, baseline_econ: BaselineEconomy,
     A_hat_path: np.ndarray, raw: RawInputs,
     *, time: int, tol: float, vfactor: float, maxit: int,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """Run the per-period counterfactual temporary equilibria.
 
-    Returns ``(realwages, Ljn_hat0)``. The realwages are
-    ``(wf_cf / wf_baseline) / Phat_cf`` — the counterfactual change in
-    consumption per labor market relative to baseline. ``base_year``
-    is the **Phase 1 static 2000 baseline** (not 2007Q4): the
-    counterfactual replays the full 200-quarter path starting from the
-    2000 anchor that produced the baseline economy.
+    Returns ``realwages = (wf_cf / wf_baseline) / Phat_cf`` — the
+    counterfactual change in consumption per labor market relative to
+    baseline. ``base_year`` is the **Phase 1 static 2000 baseline**
+    (not 2007Q4): the counterfactual replays the full 200-quarter path
+    starting from the 2000 anchor that produced the baseline economy.
     """
     J, N, R = raw.J, raw.N, raw.R
     Ltemp = Ldyn[1:, :, :]                                # drop non-employment row
     pi_baseline = baseline_econ.series_pi
     series_wages = baseline_econ.series_wages
-    Ljn_hat0_baseline = np.ones((J, N, time))
-    Ljn_hat0_baseline[:, :R, :] = baseline_econ.series_Ljnhat
 
     pi = base_year.Dinp.copy()
     VARjn0 = base_year.VARjnp.copy()
@@ -108,12 +105,13 @@ def _inner_equilibrium_path_cf(
     realwages = np.ones((J, N, time))
     kappa_hat = np.ones((J * N, N))
     Snp = np.zeros(N)
+    Ljn_hat = np.ones((J, N))                              # reused; only US block changes per t
 
     for t in range(time - 2):
-        Ljn_hat = np.ones((J, N))
         Ljn_hat[:, :R] = Ltemp[:, :, t + 1] / Ltemp[:, :, t]
         w0 = series_wages[:, :, t + 1]
-        Ljn_hat00 = Ljn_hat0_baseline[:, :, t + 1]
+        Ljn_hat00 = np.ones((J, N))
+        Ljn_hat00[:, :R] = baseline_econ.series_Ljnhat[:, :, t + 1]
         om0 = w0 * (Ljn_hat00 ** raw.B)
 
         result = solve_tvf(
@@ -127,7 +125,7 @@ def _inner_equilibrium_path_cf(
         pi = result.Dinp
         realwages[:, :, t + 1] = (result.wf0 / w0) / result.Phat[None, :]
 
-    return realwages, Ljn_hat0_baseline
+    return realwages
 
 
 def compute_counterfactual_economy(
@@ -163,7 +161,7 @@ def compute_counterfactual_economy(
         Ldyn = _evolve_labor_forward_cf(
             mu_cf, mu_baseline[..., 0], L0, J=J, R=R,
         )
-        realwages, _ = _inner_equilibrium_path_cf(
+        realwages = _inner_equilibrium_path_cf(
             Ldyn, base_year, baseline_econ, A_hat_path, raw,
             time=time, tol=tol, vfactor=vfactor, maxit=maxit,
         )

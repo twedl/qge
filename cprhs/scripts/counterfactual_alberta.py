@@ -1,20 +1,20 @@
 """Example counterfactual scaffolding for Alberta.
 
-Step 1: measure Alberta's average bilateral trade costs with (a) the United
-States and (b) the other Canadian provinces, using the Head-Ries
-ad-valorem-equivalent wedge implied by observed trade shares.
+Two steps:
 
-For sector j and partner i:
+1. Measure Alberta's average bilateral trade costs with (a) the United
+   States and (b) the other Canadian provinces, via the Head-Ries
+   ad-valorem-equivalent wedge implied by observed trade shares:
 
-    τ_{AB,i}^j = ((π_{AB,i}^j / π_{AB,AB}^j) · (π_{i,AB}^j / π_{i,i}^j))^(-T_j/2) - 1
+       τ_{AB,i}^j = ((π_{AB,i}^j / π_{AB,AB}^j) · (π_{i,AB}^j / π_{i,i}^j))^(-T_j/2) - 1
 
-where π_{n,k}^j is region n's expenditure share on source k in sector j,
-T_j = 1/θ_j is the sectoral trade elasticity reciprocal, and τ > 0 is the
-iceberg trade cost (ad-valorem-equivalent).
+   where π_{n,k}^j is region n's expenditure share on source k in sector j
+   and T_j = 1/θ_j. The wedge is symmetric.
 
-The wedge is symmetric — d_{n,i} = d_{i,n} — so τ_{AB,US} reads as
-"the average iceberg cost on a representative shipment between Alberta and
-the US, regardless of direction."
+2. Counterfactual: lift AB↔within-Canada iceberg costs by a single uniform
+   factor (1 + τ̄_{AB,USA}) / (1 + τ̄_{AB,Can}) in every tradable sector,
+   then re-solve the model. Report Alberta's outcomes and the (VA-weighted)
+   rest-of-Canada outcomes.
 
 Run:
     uv run python scripts/counterfactual_alberta.py
@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from qge.io import load_inputs
+from qge.models.benchmark import _run_shock
 
 CALIBRATION = "data/inputs/canada_2021_partners/"
 
@@ -76,10 +77,16 @@ def head_ries_wedge(Din: np.ndarray, T: np.ndarray, n: int, i: int) -> np.ndarra
     return d - 1.0
 
 
+def _weighted_mean(values: np.ndarray, weights: np.ndarray) -> float:
+    """Trade-flow-weighted mean of τ, ignoring NaN entries."""
+    mask = np.isfinite(values) & (weights > 0)
+    return float(np.sum(values[mask] * weights[mask]) / np.sum(weights[mask]))
+
+
 def main() -> None:
     raw = load_inputs(CALIBRATION)
-    Din = (raw.xbilat.reshape(raw.J, raw.N, raw.N)
-           / raw.xbilat.reshape(raw.J, raw.N, raw.N).sum(axis=2, keepdims=True))
+    xbilat_3d = raw.xbilat.reshape(raw.J, raw.N, raw.N)  # (sector, dest, source)
+    Din = xbilat_3d / xbilat_3d.sum(axis=2, keepdims=True)
 
     ab = raw.regions.index("Alberta")
     us = raw.regions.index("United States")
@@ -87,36 +94,42 @@ def main() -> None:
     tradable_idx = [raw.sectors.index(s) for s in TRADABLE_SECTORS]
     tradable_T = raw.T[tradable_idx]
     tradable_Din = Din[tradable_idx]
+    tradable_x = xbilat_3d[tradable_idx]
+
+    # Bilateral two-way trade flow between Alberta and partner i in sector j.
+    def flow(i: int) -> np.ndarray:
+        return tradable_x[:, ab, i] + tradable_x[:, i, ab]
 
     tau_us = head_ries_wedge(tradable_Din, tradable_T, ab, us)
-    tau_provinces = pd.DataFrame(
-        {p: head_ries_wedge(tradable_Din, tradable_T, ab, raw.regions.index(p))
-         for p in other_provinces},
-        index=TRADABLE_SECTORS,
-    )
+    w_us = flow(us)
+
+    tau_prov = np.column_stack([
+        head_ries_wedge(tradable_Din, tradable_T, ab, raw.regions.index(p))
+        for p in other_provinces
+    ])
+    w_prov = np.column_stack([flow(raw.regions.index(p)) for p in other_provinces])
+
+    # Per-sector trade-weighted mean across the 9 other provinces.
+    tau_prov_by_sector = np.array([
+        _weighted_mean(tau_prov[j], w_prov[j]) for j in range(len(TRADABLE_SECTORS))
+    ])
 
     by_sector = pd.DataFrame(
-        {"AB–USA": tau_us,
-         "AB–avg(other provinces)": tau_provinces.mean(axis=1, skipna=True)},
+        {"AB–USA":                  tau_us,
+         "AB–avg(other provinces)": tau_prov_by_sector},
         index=TRADABLE_SECTORS,
     )
 
-    print(f"Head-Ries trade-cost wedges (ad-valorem equivalent), {len(TRADABLE_SECTORS)} tradable sectors:\n")
+    print(f"Head-Ries trade-cost wedges (ad-valorem equivalent), {len(TRADABLE_SECTORS)} tradable sectors:")
+    print("(within-Canada column is trade-weighted across 9 provinces)\n")
     print(by_sector.map(lambda v: f"{v:>7.1%}" if pd.notna(v) else "    n/a").to_string())
     print()
 
-    avg_us = float(np.nanmean(tau_us))
-    avg_can = float(np.nanmean(tau_provinces.to_numpy()))
+    avg_us = _weighted_mean(tau_us, w_us)
+    avg_can = _weighted_mean(tau_prov.ravel(), w_prov.ravel())
 
-    print(f"Alberta–USA              average trade cost: {avg_us:.1%}")
-    print(f"Alberta–within-Canada    average trade cost: {avg_can:.1%}")
-
-    dropped = tau_provinces.isna().stack()
-    dropped = dropped[dropped].index.tolist()
-    if dropped:
-        print(f"\nDropped from within-Canada mean (no bilateral trade in this sector):")
-        for sector, province in dropped:
-            print(f"  {sector} × {province}")
+    print(f"Alberta–USA              trade-weighted average trade cost: {avg_us:.1%}")
+    print(f"Alberta–within-Canada    trade-weighted average trade cost: {avg_can:.1%}")
 
 
 if __name__ == "__main__":

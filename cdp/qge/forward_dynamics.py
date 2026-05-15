@@ -19,8 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 
-BETA = 0.99       # quarterly discount factor
-NU = 5.3436       # dispersion of taste shocks (CDP Table 4)
+from qge.helpers import BETA, NU
 
 
 def compute_mu_path(

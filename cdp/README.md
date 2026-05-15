@@ -13,9 +13,16 @@ Reference: [Lorenzo Caliendo · CDP research](https://sites.google.com/site/lore
 - **Phase 2d — Step 4 stitch is done.** Combines Phase 2a/2b/2c outputs into a single 200-quarter baseline economy (220 transitions for μ). Pure array splicing — no new computation. Verified against `Baseline_economy.mat` (HDF5/v7.3, loaded via h5py).
 - **Phase 3 — China-shock counterfactual is done.** Inverts the estimated 2000-2007 China TFP gains in 12 tradable sectors (region 56, sectors 0..11). Outer Bellman fixed-point on the value-function path V; mu and labor evolution use baseline references; 200 inner temporary equilibria with `A_hat = 1/china_TFP`. Verified against `Counterfactual_economy.mat`.
 
-**Phase 2 + Phase 3 are complete.** 31 fast tests pass; the full integration across Phase 2b/2c/2d/3 is `@pytest.mark.slow` (~15 min, dominated by the 200 inner solves).
+- **Phase 4 — Employment and welfare effects.** Pure analysis layer (`qge/effects.py`) over Phase 2d + Phase 3 outputs. Computes the long-run sectoral / regional employment-share differences induced by the China shock and the consumption-equivalent welfare change per labor market (paper eq. 28). Slow tests check signs and aggregate magnitudes against the paper.
 
-Remaining work:
+**Phases 1–4 are complete.** 31 fast tests pass; the full integration across Phase 2b/2c/2d/3/4 is `@pytest.mark.slow` (~15 min, dominated by the 200 inner solves).
+
+## Future work
+
+- **Phase 5 — extensions.** SSDI (Section 5.3.1), persistent migration (Section 5.3.2), CES utility (Appendix 3.2), real home production (Footnote 56), constant-fundamentals variant (Section 4.3). Each replaces parts of the temporary-equilibrium solver and re-runs Phase 2 + 3.
+- **DataFrame reporting layer.** Like `cprhs/`'s `.regional_summary()` / `.sectoral_summary()` / `.as_dataframe()` — labels every solver output with sector and region names so the results are interactive-friendly.
+
+Remaining work (less significant):
 - **Phase 3** — counterfactual with China-shock removed
 - **Phase 4** — employment / welfare effect figures
 - **Phase 5** — extensions (SSDI, persistence, CES, real home production)

@@ -25,18 +25,12 @@ from pathlib import Path
 import numpy as np
 from scipy.io import loadmat
 
+from qge.helpers import scrub as _scrub
 from qge.io import N_US_STATES
 from qge.models.base_year import BaseYearResult
 
 N_QUARTERS = 29     # 2000Q1 through 2007Q1 — 29 anchor points, 28 transitions.
 N_TRANS = N_QUARTERS - 1
-
-
-def _scrub(arr: np.ndarray, fill: float = 0.0) -> np.ndarray:
-    """Replace NaN and Inf with `fill`. Quarterly interpolation hits both
-    when a yearly cell is zero (0/0 → NaN, x/0 → Inf), and the MATLAB
-    Step_1_data.m zeros / unities them in identical sweeps."""
-    return np.where(np.isnan(arr) | np.isinf(arr), fill, arr)
 
 
 @dataclass(frozen=True)

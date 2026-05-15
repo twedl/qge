@@ -17,6 +17,17 @@ from __future__ import annotations
 
 import numpy as np
 
+# CDP paper constants (Table 4, Caliendo-Dvorkin-Parro 2019).
+BETA = 0.99       # quarterly discount factor
+NU = 5.3436       # dispersion of taste shocks (inverse migration elasticity)
+
+
+def scrub(arr: np.ndarray, fill: float = 0.0) -> np.ndarray:
+    """Replace NaN and Inf with ``fill``. Used at multiple boundary
+    points where 0/0 or x/0 arise from data inputs that contain zeros
+    (non-tradable trade flows, dropout migration cells)."""
+    return np.where(np.isnan(arr) | np.isinf(arr), fill, arr)
+
 
 def _inv_theta_per_jn(T: np.ndarray, N: int) -> np.ndarray:
     """(J*N, 1) column of 1/θ_j repeated N times — for kappa_hat ** (-1/T)."""

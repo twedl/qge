@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from qge.helpers import BETA, NU, scrub
+
 # China is the 7th country after 50 US states: ordering per CDP Readme is
 # Australia, Austria, Belgium, Bulgaria, Brazil, Canada, China, ... so
 # 0-indexed region index 56.
@@ -38,10 +40,6 @@ CHINA_ANNUAL_TFP = (
 )
 N_CHINA_SHOCK_SECTORS = len(CHINA_ANNUAL_TFP)         # 12
 N_CHINA_SHOCK_QUARTERS = 28                            # 2000Q1 .. 2007Q4
-
-# Migration / discount parameters from CDP Table 4 (also in forward_dynamics).
-BETA = 0.99
-NU = 5.3436
 
 
 def china_tfp_shock_path(J: int, N: int, time: int) -> np.ndarray:
@@ -82,15 +80,15 @@ def compute_mu_path_cf(
     mu[..., 0] = mu_baseline[..., 1] * (V[:, 1] ** beta)[None, :]
 
     num = mu[..., 0] * (V[:, 2] ** beta)[None, :]
-    num = np.where(np.isnan(num), 0.0, num)
+    np.nan_to_num(num, copy=False, nan=0.0)
     mu[..., 1] = num / num.sum(axis=1, keepdims=True)
 
     for t in range(1, time - 2):
         with np.errstate(invalid="ignore", divide="ignore"):
             ratio = mu_baseline[..., t + 1] / mu_baseline[..., t]
-        ratio = np.where(np.isnan(ratio) | np.isinf(ratio), 0.0, ratio)
+        np.nan_to_num(ratio, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
         num = ratio * mu[..., t] * (V[:, t + 2] ** beta)[None, :]
-        num = np.where(np.isnan(num), 0.0, num)
+        np.nan_to_num(num, copy=False, nan=0.0)
         mu[..., t + 1] = num / num.sum(axis=1, keepdims=True)
 
     # Last slice carried forward (MATLAB leaves at zeros; both are unused
@@ -137,7 +135,7 @@ def bellman_update_V_cf(
     for t in range(2, time - 1):
         with np.errstate(invalid="ignore", divide="ignore"):
             ratio = mu_baseline[..., t] / mu_baseline[..., t - 1]
-        ratio = np.where(np.isnan(ratio) | np.isinf(ratio), 0.0, ratio)
+        np.nan_to_num(ratio, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
         lam = ratio * mu_cf[..., t - 1] * rwnu[:, t:t + 1]
         V_new[:, t] = (lam * (V[:, t + 1] ** beta)[None, :]).sum(axis=1)
 

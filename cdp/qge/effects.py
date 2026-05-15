@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from qge.counterfactual_dynamics import BETA, NU
+from qge.helpers import BETA, NU, scrub
 from qge.models.baseline_economy import BaselineEconomy
 from qge.models.counterfactual import CounterfactualEconomy
 
@@ -217,14 +217,15 @@ def compute_welfare_effects(
     # hatlevrwage = 1 / levrwage_cf, hatdiag_mu = 1 / (diag_cf / diag_b)
     hat_lev_rwage = 1.0 / levrwage_cf
     with np.errstate(divide="ignore", invalid="ignore"):
-        hat_diag_mu = diag_b / diag_cf
-    hat_diag_mu = np.where(np.isnan(hat_diag_mu) | np.isinf(hat_diag_mu), 1.0, hat_diag_mu)
+        hat_diag_mu = scrub(diag_b / diag_cf, fill=1.0)
+
+    # Log integrand is independent of t; compute once and slice per-t inside the loop.
+    with np.errstate(invalid="ignore", divide="ignore"):
+        log_integrand = scrub(np.log(hat_lev_rwage / (hat_diag_mu ** nu)))
 
     logdelta = np.full((R, J + 1, T), np.nan)
     for t in range(1, T):
-        with np.errstate(invalid="ignore", divide="ignore"):
-            integrand = np.log(hat_lev_rwage[..., t:] / (hat_diag_mu[..., t:] ** nu))
-        weighted = betavec[..., t:] * np.where(np.isnan(integrand) | np.isinf(integrand), 0.0, integrand)
+        weighted = betavec[..., t:] * log_integrand[..., t:]
         logdelta[..., t] = (1 - beta) * weighted.sum(axis=2) / beta ** (t - 1)
 
     # Aggregate using initial labor distribution: L0 reshaped (R, J+1).

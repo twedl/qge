@@ -222,7 +222,7 @@ Known gaps in the current `canada_2021` calibration, ordered by expected impact.
 **Rest of World (ROW)**
 - *Was:* synthetic — gross output set to 50× Canada per sector, intra-trade as a residual, γ/α/B copied from the Canadian provincial average, employment scaled from Canada.
 - *Now (Option 1, done):* `scripts/add_icio_row.py` aggregates real non-Canadian data from OECD ICIO 2023 (year 2021 to match StatCan vintage). Replaces ROW intra-trade (bilateral_trade), γ (value_added_share), and α (final_demand_share). Run after `build_canada_iot.py`. ROW B and ROW employment still use the Canadian-average / Canadian-proportional fallbacks because ICIO carries neither a wages/GOS decomposition nor employment counts — they're noted limitations below.
-- *Better (Option 2, future):* decompose ROW into the major Canadian trading partners — USA (~75% of Canadian external trade), China, EU, UK, Japan, Mexico — plus a residual. Schema scales to ~17 regions; no model changes required (`RawInputs` is region-count agnostic). Requires bilateral concordance between ICIO ISIC and our NAICS-based 23-sector taxonomy.
+- *Done (Option 2):* `scripts/expand_icio_partners.py` decomposes ROW into 6 named trading partners (USA, China, UK, Japan, Mexico, Germany) plus a residual, yielding the 17-region `canada_2021_partners/` calibration. Province-to-partner flows are split using Canada's national ICIO partner shares per sector (Armington simplification — refining this with StatCan 12-10-0099 provincial-partner data is itself a future improvement noted under the bilateral_trade caveat).
 - *Best (Option 3, future):* keep all 80 non-Canadian ICIO countries as their own regions. 10 Canadian provinces + 80 country regions = 90-region model, giving full bilateral resolution for every Canada-vs-country shock. Watch for the interior-equilibria constraint at this granularity — many tiny country × narrow sector cells will be near-zero, so aggregation to a slightly coarser sector taxonomy (or omitting a handful of micro-economies) may be required. The model itself doesn't care about `N=90` vs `N=11` — just keep `N²` trade dense enough.
 
 **Employment for ROW**
@@ -271,17 +271,17 @@ result = compute_baseline(raw=raw)               # everything below derives from
 
 `regional_sweep(raw=raw)` and `sectoral_sweep(raw=raw)` shock each region (or sector) one at a time with a standardized 10% TFP boost, solve the new equilibrium, and record three aggregate responses per shock. The resulting table has one row per region or sector and three elasticity columns:
 
-| column | definition | reads as |
+| column | formula | reads as |
 |---|---|---|
-| `TFP_elasticity` | `(aggregate_TFP_hat − 1) / (shock_size − 1)` | "% change in world TFP per 1% local TFP boost" |
-| `GDP_elasticity` | `(aggregate_GDP_hat − 1) / (shock_size − 1)` | same for real GDP |
-| `welfare_elasticity` | `(aggregate_welfare_hat − 1) / (shock_size − 1)` | same for real consumption per worker (Cobb-Douglas) |
+| `TFP_elasticity` | `10 · (TFP_hat − 1) / (Y_n / Y)` | aggregate-TFP response divided by region's gross-output share |
+| `GDP_elasticity` | `10 · (GDP_hat − 1) / (VA_n / VA)` | aggregate-GDP response divided by region's value-added share |
+| `welfare_elasticity` | `10 · (V_hat − 1) / L_n` | aggregate-welfare response divided by region's labor share |
 
-For the standard 10% shock (`shock_size = 1.10`) the denominator is fixed at 0.10, so the elasticity is just the aggregate's percentage response divided by 10.
+The factor of 10 renormalizes the 10%-shock denominator to per-1%. The denominator is the shocked region's share of the relevant world aggregate, so the elasticity asks: *did the aggregate move more than the region's mechanical accounting weight predicts?*
 
 **Interpretation by magnitude:**
-- *Below the region's GDP share* — the rest of the economy partly absorbed the shock via trade reallocation (cheaper local goods crowd out output elsewhere on the margin).
-- *Around the region's GDP share* — roughly unitary pass-through.
-- *Above 1* — input-output and trade linkages amplify the local shock beyond mechanical accounting weight. A 10% Ontario TFP boost that produces GDP elasticity ≈ 1.4 means Canadian + ROW aggregate GDP rose by ~14% — Ontario-produced intermediates and consumption goods feed productivity gains everywhere downstream.
+- *= 1* — aggregate moved exactly in proportion to the shocked region's accounting share. Mechanical pass-through; no amplification or absorption.
+- *> 1* — input-output and trade linkages amplify the shock past the region's GDP weight. Ontario at 1.4 means the world economy responded 1.4× what a mechanical Ontario-share account would predict, because Ontario-produced intermediates and consumption goods feed downstream productivity for everyone trading with Ontario.
+- *< 1* — the rest of the economy partly absorbed the shock via trade reallocation (cheaper local goods crowd out output elsewhere on the margin).
 
-The sweep is the model's answer to "where would a one-time productivity boost have the largest aggregate payoff." Diagonal-only — each row holds the rest of the world fixed at baseline and shocks the named region (or sector) in isolation.
+The sweep is the model's answer to "where would a one-time productivity boost have the largest aggregate payoff per unit of regional weight." Diagonal-only — each row holds the rest of the world fixed at baseline and shocks the named region (or sector) in isolation.

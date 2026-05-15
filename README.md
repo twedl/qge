@@ -13,7 +13,7 @@ Ported and verified against the MATLAB workspaces to machine epsilon (relative e
 - **Model variants** — NS (no sectoral linkages), NR (no regional trade), NRNS (both) baselines.
 - **Geographic-barriers** counterfactuals — distance and other-barriers scenarios.
 - **Reporting layer** — `.regional_summary()`, `.sectoral_summary()`, `.as_dataframe()` on every result type; outputs are pandas DataFrames indexed by sector / region names.
-- **Canadian calibration** — `data/inputs/canada_2021/` built from StatCan provincial symmetric IOTs (catalogue 15-211-X, Link-1997 level) for the Canadian provinces and from OECD ICIO 2021 for Rest of World. 23 sectors × 11 regions (10 provinces + ROW; territories folded into ROW). Baseline solves in ~0.2s; full regional sweep in ~3s.
+- **Canadian calibration** — `data/inputs/canada_2021/` built from StatCan provincial symmetric IOTs (catalogue 15-211-X, Link-1997 level) for the Canadian provinces and from OECD ICIO 2021 for Rest of World. 23 sectors × 11 regions (10 provinces + ROW; territories folded into ROW). Baseline solves in ~0.2s; full regional sweep in ~3s. A 17-region variant at `data/inputs/canada_2021_partners/` breaks ROW into Canada's major trading partners (USA, China, UK, Japan, Mexico, Germany + residual) for partner-specific shock analysis.
 
 **44 tests pass in ~100 seconds.**
 
@@ -64,7 +64,7 @@ sweep = regional_sweep(verbose=True)
 print(sweep.as_dataframe().round(4))
 ```
 
-Each row of the sweep table is the response of an aggregate outcome (TFP / GDP / welfare) to a standardized 10% TFP shock applied to that region (or sector) alone. The elasticity is `(aggregate_hat − 1) / (shock_size − 1)`, so 0.5 means "10% local shock moved the aggregate by 5%." Values above 1 indicate trade and input-output linkages amplify the shock past the region's mechanical GDP weight; values below the region's GDP share mean partial absorption. See DATA.md for the formal definition.
+Each row of the sweep table is the response of an aggregate outcome (TFP / GDP / welfare) to a standardized 10% TFP shock applied to that region (or sector) alone, divided by the region's share of the corresponding aggregate. Elasticity = 1 means the aggregate moved exactly in proportion to the region's mechanical accounting weight; > 1 means trade and input-output linkages amplified the shock; < 1 means the rest of the economy partly absorbed it. See DATA.md for the formal definition.
 
 ## Project layout
 
@@ -84,13 +84,15 @@ data/inputs/cprhs/         CPRHS reference calibration (committed parquet)
     ├── *.parquet          eight core calibration files
     ├── applications/      shock data for the four applications
     └── geographic_barriers/   kappa_hat shocks for trade-cost analysis
-data/inputs/canada_2021/   Canadian calibration (StatCan IOTs L97, 2021)
+data/inputs/canada_2021/            Canadian calibration (StatCan IOTs L97, 2021; 11 regions)
+data/inputs/canada_2021_partners/   Same with ROW broken into 6 trading partners (17 regions)
 
 scripts/
-├── convert_cprhs.py       MATLAB .mat → CPRHS parquet
-├── convert_statcan.py     StatCan WDS API helpers (employment, θ, portfolio)
-├── build_canada_iot.py    StatCan 15-211-X IOTs → canada_YYYY/ (synthetic ROW)
-└── add_icio_row.py        OECD ICIO ROW overrides → real bilateral/γ/α for Rest of World
+├── convert_cprhs.py            MATLAB .mat → CPRHS parquet
+├── convert_statcan.py          StatCan WDS API helpers (employment, θ, portfolio)
+├── build_canada_iot.py         StatCan 15-211-X IOTs → canada_YYYY/ (synthetic ROW)
+├── add_icio_row.py             OECD ICIO ROW overrides → real bilateral/γ/α for ROW
+└── expand_icio_partners.py     Break ROW into named trading partners → canada_YYYY_partners/
 
 tests/                     44 tests — baseline, shocks, applications,
                            variants, geographic, elasticities, reporting,

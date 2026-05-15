@@ -37,6 +37,7 @@ class DynamicBaseline2000_2007:
     New_Din_baseline: np.ndarray         # (J*N, N, N_QUARTERS)
     New_series_xbilat: np.ndarray         # (J*N, N, N_QUARTERS)
     New_series_wageshat: np.ndarray       # (J, N, N_QUARTERS)
+    final_equilibrium: EquilibriumResult  # 2007Q4 state — seed for Phase 2c
 
 
 def solve_tvf(
@@ -136,6 +137,7 @@ def compute_dynamic_baseline_2000_2007(
     A_hat = np.ones((J, N))     # CDP baseline has no TFP shocks
     Snp = np.zeros(N)
 
+    result: EquilibriumResult | None = None
     for t in range(N_TRANS):
         Ljn_hat = Ljn_hat0[:, :, t + 1]
         om0 = quarterly.series_wageshat[:, :, t + 1] * (Ljn_hat ** raw.B)
@@ -157,8 +159,10 @@ def compute_dynamic_baseline_2000_2007(
         New_series_xbilat[..., t + 1] = result.xbilatp
         New_series_wageshat[..., t + 1] = result.wf0
 
+    assert result is not None
     return DynamicBaseline2000_2007(
         New_Din_baseline=New_Din_baseline,
         New_series_xbilat=New_series_xbilat,
         New_series_wageshat=New_series_wageshat,
+        final_equilibrium=result,
     )

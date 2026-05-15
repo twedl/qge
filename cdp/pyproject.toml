@@ -24,4 +24,7 @@ packages = ["qge"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra -m 'not slow'"
+markers = [
+    "slow: marks tests as slow (deselect by default; run with --runslow or -m slow)",
+]

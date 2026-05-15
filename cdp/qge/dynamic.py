@@ -54,6 +54,7 @@ class QuarterlySeries:
     series_xbilat: np.ndarray         # (J*N, N, N_QUARTERS)
     series_wageshat: np.ndarray       # (J, N, N_QUARTERS)
     series_Ljn0hat: np.ndarray        # (J+1, R, N_QUARTERS)
+    series_L0: np.ndarray             # (RJ1, N_QUARTERS) — labor levels per quarter
     series_mu: np.ndarray             # (RJ1, RJ1, N_TRANS)
     L0_initial: np.ndarray            # (RJ1,)
 
@@ -209,6 +210,7 @@ def build_quarterly_series(
         series_xbilat=series_xbilat,
         series_wageshat=series_wageshat,
         series_Ljn0hat=series_Ljn0hat,
+        series_L0=series_L0,
         series_mu=series_mu,
         L0_initial=L0_initial,
     )

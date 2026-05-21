@@ -48,41 +48,77 @@ and CPRHS 2017.**
   with a few 3-digit splits within machinery and transport. 15 manufacturing
   sub-sectors + Agriculture + Mining + 3 service buckets where θ is not
   estimated (services are non-traded in CP's NAFTA application).
-- Reported θ values (per CP-2015 Table 1, "99% sample" column — the authors'
-  preferred benchmark, winsorizing the top 1% of trade-growth observations):
+- Reported θ values — **CP-2015 Table 1, full picture** (p.18, year 1993):
 
-  | # | ISIC Rev3 | Sector | θ |
-  |---|---|---|---|
-  | 1 | 01–05 | Agriculture | 9.11 |
-  | 2 | 10–14 | Mining | 13.53 |
-  | 3 | 15–16 | Food, beverages, tobacco | 2.62 |
-  | 4 | 17–19 | Textile, apparel, leather | 8.10 |
-  | 5 | 20 | Wood | 11.50 |
-  | 6 | 21–22 | Paper, printing, publishing | 16.52 |
-  | 7 | 23 | Petroleum, coal | 64.85 |
-  | 8 | 24 | Chemicals | 3.13 |
-  | 9 | 25 | Plastics, rubber | 1.67 |
-  | 10 | 26 | Non-metallic minerals | 2.41 |
-  | 11 | 27 | Basic metals | 3.28 † |
-  | 12 | 28 | Fabricated metal products | 6.99 |
-  | 13 | 29 | Machinery n.e.c. | 1.45 † |
-  | 14 | 30 | Office, computing | 12.95 |
-  | 15 | 31 | Electrical machinery | 12.91 |
-  | 16 | 32 | Radio, TV, communications | 3.95 |
-  | 17 | 33 | Medical, precision | 8.71 |
-  | 18 | 34 | Auto | 1.84 † |
-  | 19 | 35 | Other transport equipment | 0.39 |
-  | 20 | 36–37 | Other manufacturing | 3.98 |
+  Three sample-restriction columns. The 99% and 97.5% columns drop the bottom
+  1% / 2.5% of countries by trade share within each sector and re-estimate.
+  CP's preferred / benchmark column is the **99% sample** (their words).
+  Each cell reports (θ, s.e., N).
 
-  † CP themselves flag these three sectors (basic metals, machinery n.e.c.,
-  auto) as having an unreliable / sign-flipped estimate under winsorization
-  and recommend replacing with the manufacturing mean (~4.5).
+  | # | ISIC Rev3 | Sector | Full sample θ | 99% sample θ | 97.5% sample θ |
+  |---|---|---|---|---|---|
+  | 1 | 01–05 | Agriculture | 8.11 | 9.11 | 16.88 |
+  | 2 | 10–14 | Mining | 15.72 | 13.53 | 17.39 |
+  | 3 | 15–16 | Food, beverages, tobacco | 2.55 | 2.62 | 2.46 |
+  | 4 | 17–19 | Textile, apparel, leather | 5.56 | 8.10 | 1.74 |
+  | 5 | 20 | Wood | 10.83 | 11.50 | 11.22 |
+  | 6 | 21–22 | Paper, printing, publishing | 9.07 | 16.52 | 2.57 |
+  | 7 | 23 | Petroleum, coal | 51.08 | 64.85 | 61.25 |
+  | 8 | 24 | Chemicals | 4.75 | 3.13 | 2.94 |
+  | 9 | 25 | Plastics, rubber | 1.66 | 1.67 | 0.60 |
+  | 10 | 26 | Non-metallic minerals | 2.76 | 2.41 | 2.99 |
+  | 11 | 27 | Basic metals | 7.99 | 3.28 † | **−0.05** |
+  | 12 | 28 | Fabricated metal products | 4.30 | 6.99 | 0.52 |
+  | 13 | 29 | Machinery n.e.c. | 1.52 | 1.45 † | **−2.82** |
+  | 14 | 30 | Office, computing | 12.79 | 12.95 | 11.47 |
+  | 15 | 31 | Electrical machinery | 10.60 | 12.91 | 3.37 |
+  | 16 | 32 | Radio, TV, communications | 7.07 | 3.95 | 4.82 |
+  | 17 | 33 | Medical, precision | 9.98 | 8.71 | 1.97 |
+  | 18 | 34 | Auto | 1.01 | 1.84 † | **−3.06** |
+  | 19 | 35 | Other transport equipment | 0.37 | 0.39 | 0.53 |
+  | 20 | 36–37 | Other manufacturing | 5.00 | 3.98 | 3.06 |
+  | **—** | **all mfg pooled** | **Aggregate elasticity** | **4.45** | **4.49** | **3.29** |
 
-- Petroleum is an extreme outlier (θ ≈ 51–65 depending on column). Any
-  aggregation that lumps petroleum with other chemicals is highly sensitive to
-  weights.
-- CP do not report a pooled all-manufacturing θ; downstream papers compute
-  one if they need one.
+  F-test of common θ across sectors: F(17, 7294) = 7.52, Prob > F = 0.00 →
+  sectoral heterogeneity is statistically significant.
+
+  † **What CP actually plug into the NAFTA model** is *not* the 99%-sample θ
+  for the three sectors marked † (basic metals, machinery n.e.c., auto). Per
+  p.18–19 of the WP:
+
+  > "As we compare across estimates, we note that three sectors are not
+  > robust since they changed sign with the sample restriction. These sectors
+  > are Basic metals, Machinery n.e.c., and Auto. … Our benchmark estimates
+  > are the estimates presented in Table 1 for the 99% sample, since they
+  > control for outliers. **For the sectors Basic metals, Machinery n.e.c.,
+  > and Auto we replace them by the mean estimate for the manufacturing
+  > sector.**"
+
+  And p.20:
+
+  > "…use the trade elasticities, θ^j sourced from the estimates presented in
+  > Table 1, **column 5**, to quantify the effects of tariff changes."
+
+  Table 1 column 5 = the 99%-sample θ column. So CP's published vector is:
+  17 of 18 manufacturing sectors plus Ag + Mining at their 99%-sample Table 1
+  estimate, and 3 of 18 manufacturing sectors (basic metals, machinery
+  n.e.c., auto) overridden with the "mean estimate for the manufacturing
+  sector." The most natural reading of that phrase is the bottom-row
+  **Aggregate elasticity for the 99% sample = 4.49** (a pooled regression
+  with N = 5102, distinct from a simple per-sector mean). Our
+  `akt_replication.py` uses 4.5 for these three, consistent with this
+  reading.
+
+- **Petroleum (sector 7) is an extreme outlier** at θ ≈ 51–65 across columns.
+  Aggregations that lump petroleum with other chemicals are highly sensitive
+  to weights.
+- **Chemicals (sector 8) treats China as an outlier.** Footnote on p.19: with
+  China included, Chemicals θ = 1.39 (full), −0.64 (99%), −0.93 (97.5%).
+  Table 1 excludes China for Chemicals only; China's share is 5% of trade in
+  that sector.
+- **Robustness with FE.** CP re-estimate Table 1 with importer and exporter
+  fixed effects and present those values in Table A.1 of the Appendix
+  "Additional Results." We have not yet transcribed Table A.1 into this doc.
 
 ### Costinot, Donaldson & Komunjer 2012 — *Restud*
 
@@ -264,25 +300,34 @@ widely-cited reference values.
    questions: (a) what concordance from the 20 CP sectors to the target
    taxonomy? (b) what weighting scheme (simple mean, trade-weighted, harmonic)
    for the aggregation?
-2. **Sample column matters in CP-2015.** CP report both "All sample" and "99%
-   sample" columns; values can differ by factors of 2–5 in some sectors. The
-   user-saved `_CP_99` dict in `scripts/akt_replication.py` uses the
-   "99% sample" benchmark column, which is the one CP themselves recommend.
-3. **Petroleum is an extreme outlier.** θ_Petroleum ≈ 51 (99% sample) or 65
-   (all sample). Aggregations that combine petroleum with chemicals and
-   plastics are highly weight-sensitive. AT-2016 reports θ ≈ 19.16 for ISIC
-   23–25; this is an unweighted mean and may not be the right aggregation for
-   our purposes.
-4. **CDK-2012 industry list is the cleanest match for AT-2016 Table 9.** CDK's
+2. **Sample column matters in CP-2015.** CP report three sample columns —
+   Full, 99% sample, 97.5% sample — and they differ by factors of 2–5 in
+   several sectors. CP's benchmark is the 99% sample.
+3. **CP's "Table 1, column 5" is NOT a clean vector.** CP override three
+   sectors (basic metals, machinery n.e.c., auto) with the manufacturing
+   pooled aggregate (≈ 4.49 under the 99% sample) because the per-sector
+   estimates flip sign under the 97.5% restriction. Any code that claims to
+   "use the 99% sample" needs to be explicit about whether it applies this
+   substitution. Our `akt_replication.py` does (with 4.5 for the three
+   sectors); `cprhs/qge/io.py` `_CPRHS_T` does **not** (it uses CP's Full
+   sample column directly, including 1.52 for Machinery and 1.01 for Auto).
+4. **Petroleum is an extreme outlier.** θ_Petroleum ≈ 51 (full or 99%
+   sample) or 65 (rounded in some sources). Aggregations that combine
+   petroleum with chemicals and plastics are highly weight-sensitive. AT-2016
+   reports θ ≈ 19.16 for ISIC 23–25; this is an unweighted mean and may not
+   be the right aggregation for our purposes.
+5. **CDK-2012 industry list is the cleanest match for AT-2016 Table 9.** CDK's
    13 manufacturing sectors line up nearly 1-to-1 with AT's manufacturing
    rows. CDK's single θ ≈ 6.53 is a useful sanity check on aggregations.
-5. **Imbs-Méjean 2017 and Fontagné-Guimbard-Orefice 2022 are the relevant
+6. **Imbs-Méjean 2017 and Fontagné-Guimbard-Orefice 2022 are the relevant
    contemporary alternatives** to CP-2015 if we want a vector estimated on
    data from the 2000s rather than 1993. Both are tariff/HS-based.
-6. **Single-θ shortcuts.** EK-2002 (θ = 8.28), SW-2014 (θ = 4.0), and Head-Mayer
+7. **Single-θ shortcuts.** EK-2002 (θ = 8.28), SW-2014 (θ = 4.0), and Head-Mayer
    modal (θ ≈ 5) are the three canonical scalar choices. Our current
-   `counterfactual_alberta.py` uses SW-2014's θ = 4.0.
-7. **Translating frameworks.** Armington σ from Broda-Weinstein or
+   `counterfactual_alberta.py` uses SW-2014's θ = 4.0. CP-2015 themselves
+   report a pooled estimate (Table 1 last row) of 4.45 / 4.49 / 3.29 across
+   their three sample columns — close to SW-2014.
+8. **Translating frameworks.** Armington σ from Broda-Weinstein or
    Imbs-Méjean is *not* directly comparable to EK θ; the equivalence θ ≡ σ − 1
    holds only under specific assumptions (single-sector CES, no firm-level
    heterogeneity). Use translations with care.

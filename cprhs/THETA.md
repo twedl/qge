@@ -5,10 +5,16 @@ calibration (`sectoral_dispersion.parquet` stores `T_j = 1/θ_j`). Existence of
 this file is a one-stop catalogue so that the choice of θ_j vector for any
 given calibration can be traced back to a primary academic estimate.
 
-This is part 1: **original sources of θ** and the industry classification each
-paper estimates against. Subsequent sections (to be filled in) will document
-how derived works (Albrecht-Tombe 2016, Alvarez-Krznar-Tombe 2019, CPRHS 2017,
-our own builds) re-aggregate the originals.
+This document grows in parts:
+- **Part 1 (done):** original sources of θ and the industry classifications
+  each paper estimates against — see "Original sources" below.
+- **Part 2a (TODO):** derive AT-2016 Table 9 from our benchmark (forward
+  problem — AT publish their θ, we just need to find the aggregation).
+- **Part 2b (TODO):** infer AKT-2019's effective θ via Head-Ries matching
+  (inverse problem — AKT do not publish θ; we back it out from their Tables
+  1–2 NG numbers).
+- **Part 3 (TODO):** derive `sectoral_dispersion.parquet` for our 23-sector
+  NAICS calibration from the benchmark.
 
 ## Model role of θ
 
@@ -25,6 +31,69 @@ Sectoral heterogeneity in θ matters because welfare gains from liberalization
 in high-θ sectors are smaller per percentage-point reduction in trade costs
 than in low-θ sectors. Choosing a θ source is therefore a first-order
 calibration decision, not a tuning knob.
+
+---
+
+## Benchmark θ vector
+
+For our replication work we adopt **CP-2015's 99%-sample column with CP's
+published corrections** as the starting point for every derived θ vector. We
+call this the *benchmark θ*. It is the same vector CP-2015 plug into their
+NAFTA simulation (CP-2015 p.20: "use the trade elasticities, θ^j sourced from
+the estimates presented in Table 1, column 5") with the substitution rule
+they spell out on p.18–19: Basic metals, Machinery n.e.c., and Auto are
+replaced by the manufacturing-aggregate elasticity because their per-sector
+estimates flip sign under the 97.5% restriction.
+
+Why anchor every downstream vector to this benchmark: it is the *only* θ
+vector that CP-2015 themselves operationalize. The Full and 97.5% columns are
+robustness reporting. Threading every derivation (AT-2016, AKT-2019, CPRHS-
+2017, our 23-sector NAICS) through CP's published benchmark keeps the
+provenance chain auditable.
+
+| # | ISIC Rev3 | Sector | Benchmark θ | Source within CP-2015 Table 1 |
+|---|---|---|---|---|
+| 1 | 01–05 | Agriculture | 9.11 | 99% sample |
+| 2 | 10–14 | Mining | 13.53 | 99% sample |
+| 3 | 15–16 | Food, beverages, tobacco | 2.62 | 99% sample |
+| 4 | 17–19 | Textile, apparel, leather | 8.10 | 99% sample |
+| 5 | 20 | Wood | 11.50 | 99% sample |
+| 6 | 21–22 | Paper, printing, publishing | 16.52 | 99% sample |
+| 7 | 23 | Petroleum, coal | 64.85 | 99% sample |
+| 8 | 24 | Chemicals (excl. China) | 3.13 | 99% sample |
+| 9 | 25 | Plastics, rubber | 1.67 | 99% sample |
+| 10 | 26 | Non-metallic minerals | 2.41 | 99% sample |
+| 11 | 27 | **Basic metals** | **4.49** | substitution (mfg-aggregate, 99% sample) |
+| 12 | 28 | Fabricated metal products | 6.99 | 99% sample |
+| 13 | 29 | **Machinery n.e.c.** | **4.49** | substitution (mfg-aggregate, 99% sample) |
+| 14 | 30 | Office, computing | 12.95 | 99% sample |
+| 15 | 31 | Electrical machinery | 12.91 | 99% sample |
+| 16 | 32 | Radio, TV, communications | 3.95 | 99% sample |
+| 17 | 33 | Medical, precision | 8.71 | 99% sample |
+| 18 | 34 | **Auto** | **4.49** | substitution (mfg-aggregate, 99% sample) |
+| 19 | 35 | Other transport equipment | 0.39 | 99% sample |
+| 20 | 36–37 | Other manufacturing | 3.98 | 99% sample |
+
+**Interpretation of the substitution value.** CP-2015 p.19: "we replace them
+by the mean estimate for the manufacturing sector." The phrase is mildly
+ambiguous; the most defensible numerical reading is CP-2015 Table 1's
+bottom-row Aggregate elasticity for the 99% sample = **4.49** (a pooled
+regression, N = 5102, s.e. 0.39). A simple per-sector average of the 17
+non-substituted manufacturing θ would be ~10.7, which is too far from
+anything CP cite to be a plausible reading. Our `akt_replication.py` uses
+4.5 (rounded), which is within ~0.2% of 4.49.
+
+**Note on the Chemicals row.** CP-2015 publish two versions of the Chemicals
+estimate: with-China and without-China. The benchmark above uses the
+without-China value (3.13 for the 99% sample) because that is what CP put in
+Table 1. The with-China value (−0.64 under 99% sample) is reported only in
+their p.19 footnote.
+
+This vector has not yet been materialized as a parquet/CSV. When Parts 2 and
+3 land we'll probably want to store it under
+`cprhs/data/inputs/calibrations/cp2015_benchmark.parquet` (20 sectors × 1
+value), so derived θ vectors can load + transform it programmatically rather
+than copy-pasting numbers.
 
 ---
 
@@ -332,15 +401,104 @@ widely-cited reference values.
    holds only under specific assumptions (single-sector CES, no firm-level
    heterogeneity). Use translations with care.
 
-## To-be-filled sections
+## Part 2a — Derive AT-2016 Table 9 from the benchmark (forward)
 
-- **Derived calibrations.** Concordance of CP-2015 (20 sectors) →
-  AT-2016 (22 ISIC Rev3 sectors), AKT-2019 (9 S&U-coded goods sectors),
-  CPRHS-2017 (15 tradable + 11 non-tradable NAICS sectors), and our
-  `canada_2010` / `canada_2021_partners` 23-sector taxonomy. With aggregation
-  weights for each step.
-- **Validation.** Side-by-side comparison of θ vectors implied by each
-  derivation path; sensitivity of welfare gains to the choice.
-- **Recommended default.** Which θ vector should `sectoral_dispersion.parquet`
-  carry by default, with what aggregation method, and where the alternatives
-  live.
+AT-2016 publish a θ vector for 22 ISIC Rev3 sectors (Table 9, paper p.26).
+AT's footnote: "trade elasticity is from the Caliendo and Parro (2015)
+estimates, averaged up to a slightly higher level of aggregation. Sectors 40
+and above have elasticities of 5, consistent with Costinot and Rodriguez-
+Clare (2014)." This is a **forward problem**: AT tell us they aggregate
+CP-2015, we need to identify *how*.
+
+Method:
+1. Take the 20-sector benchmark above.
+2. Aggregate to AT-2016's 22 ISIC Rev3 buckets via the AT-row → CP-row
+   concordance (clean except for AT "Wood (20)" + "Paper (21–22)" which split
+   our benchmark Wood vs Paper, and AT "Metals (26–28)" + "Equipment, Vehicles
+   (29–35)" which together cover ISIC 26 through 35).
+3. Try candidate aggregation schemes: simple unweighted mean, trade-weighted
+   mean using CP's per-cell N as weights, harmonic mean of θ.
+4. For AT-2016 rows that exactly match a single benchmark sector (e.g. Wood,
+   Chemicals/Rubber), the aggregation reduces to identity — these are the
+   sanity checks that any candidate scheme has to pass.
+5. Pin down which scheme reproduces AT-2016 Table 9 best. Specifically:
+   - AT's Agriculture-Mining (ISIC 01–14) = 11.92: should match some mean of
+     benchmark Agriculture (9.11) and Mining (13.53). Simple mean = 11.32;
+     gap of 0.6.
+   - AT's Food-Textiles (ISIC 15–19) = 4.56: benchmark Food 2.62 + Textile
+     8.10 → simple mean 5.36; gap of 0.8.
+   - AT's Chemicals-Rubber (ISIC 23–25) = 19.16: benchmark Petroleum 64.85 +
+     Chemicals 3.13 + Plastics 1.67 = simple mean 23.22; if we use the
+     substitution-aware benchmark on petroleum (no substitution applies
+     there), 23.22 → gap of 4. Maybe AT use a different aggregation, or a
+     trade-weighted mean that down-weights petroleum, or a different CP-2015
+     column.
+   - AT's Metals (ISIC 26–28) = 5.02: benchmark Minerals 2.41 + (Basic metals
+     4.49 substitution) + Metal products 6.99 = simple mean 4.63; gap of
+     0.39. Closer.
+   - AT's Equipment-Vehicles (ISIC 29–35) = 6.19: spans ISIC 29 through 35 in
+     our benchmark — 7 sectors with widely-varying θ. Simple mean across
+     benchmark sectors (Machinery 4.49, Office 12.95, Electrical 12.91,
+     Communication 3.95, Medical 8.71, Auto 4.49, Other Transport 0.39) =
+     6.84; gap of 0.65.
+
+   The pattern of gaps suggests AT may use trade weights or may use a
+   non-benchmark CP column (e.g., Full sample without substitutions) for some
+   rows. Need to test systematically.
+
+Deliverable: a small script (probably `scripts/derive_at_theta.py`) that
+takes the benchmark vector, applies a documented aggregation scheme, and
+produces AT-2016 Table 9. Score by RMSE against published AT values.
+
+## Part 2b — Infer AKT-2019 effective θ via Head-Ries matching (inverse)
+
+AKT-2019 do **not** publish their θ vector. Their Tables 1–2 report
+non-geographic trade barriers per sector and per province; these are computed
+from a Head-Ries index that depends on θ. This is an **inverse problem**:
+find the 9-sector θ vector that, when plugged into AKT's Head-Ries pipeline
+applied to public StatCan data, best reproduces AKT's published numbers.
+
+Method (`scripts/akt_replication.py` is already most of the way there):
+1. Aggregate the 20-sector benchmark to AKT's 9 goods sectors via the S&U
+   product-code concordance already in the script.
+2. Try multiple candidate vectors:
+   - Direct CP-99-with-substitution benchmark aggregated to AKT-9 (this is
+     what `_CP_99` currently does, with the dominant CP sub-sector per AKT
+     bucket).
+   - Trade-weighted using StatCan interprovincial flow shares as weights.
+   - Range of single-θ pooled values (4, 5, 6, 8.28) as ablation baselines.
+3. Score each candidate by:
+   - **Primary:** mean absolute deviation from AKT Table 1 (per-sector NG)
+     and Table 2 (per-province NG) for 2015.
+   - **Secondary:** AKT's headline "interprovincial all-goods NG ≈ 19%"
+     summary statistic.
+4. The θ vector with the lowest score is our inferred AKT-effective θ.
+   Document it next to the AT-2016 derived vector for comparison.
+
+Caveat: AKT also use proprietary StatCan data (services trade between
+provinces and the USA, pre-2007 interprovincial detail) that we cannot
+replicate exactly. The inverse problem is therefore only well-posed up to
+the residual model misspecification from those data gaps. Plan to report the
+fit quality, not just the inferred θ.
+
+## Part 3 — Rebuild sectoral_dispersion.parquet from the benchmark
+
+`cprhs/data/inputs/canada_2010/sectoral_dispersion.parquet` is currently
+built by `convert_statcan._cprhs_theta_per_sector()`, which uses CP-2015's
+Full sample column (not the benchmark 99%-sample-with-substitutions) and a
+different aggregation rule from what AT-2016 or AKT-2019 use. The mismatch
+shows up most starkly for Petroleum and Chemicals (3.60 vs benchmark
+implies ~19) and Transportation Equipment (1.01 vs benchmark implies ~4–6
+after substitution).
+
+Once Parts 2a/2b clarify our preferred aggregation conventions, rebuild
+`_cprhs_theta_per_sector()` to:
+1. Start from the benchmark θ vector (20 CP-2015 sectors).
+2. Apply the concordance CP-2015 → 23 NAICS sectors that mirrors AT-2016's
+   convention where possible. The NAICS-to-CP-ISIC mapping is straightforward
+   except for two sectors that split CP rows differently from AT (our
+   "Wood, Paper, Printing" lumps CP Wood + Paper; our "Metals and Machinery"
+   straddles CP ISIC 27–29).
+3. Regenerate `sectoral_dispersion.parquet` for both `canada_2010` and
+   `canada_2021_partners`. Document the diff against the current vector and
+   the welfare-gain sensitivity in a separate validation note.

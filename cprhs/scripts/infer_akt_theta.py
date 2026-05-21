@@ -49,6 +49,7 @@ from akt_replication import (  # noqa: E402
     load_canada_us_trade,
     load_interprov,
 )
+from icio_usa_intra import load_usa_intra_per_akt_sector  # noqa: E402
 
 # ── AKT-2019 Table 1 published values (2015 goods, %) ─────────────────────
 # Per sector: (τ̄ obs, τ̄ geo, τ̄ NG)
@@ -219,11 +220,19 @@ def main() -> None:
     if not csv.exists():
         raise FileNotFoundError(f"missing {csv}; run StatCan 12-10-0088 fetcher first")
     canus = Path("/tmp/canada_us_trade_2007_2015.parquet")
+    icio_csv = Path("/tmp/icio/2015_SML.csv")
+    if not icio_csv.exists():
+        raise FileNotFoundError(
+            f"missing {icio_csv}; extract via "
+            f"`mkdir -p /tmp/icio && unzip -o ~/Downloads/2011-2015_SML.zip "
+            f"2015_SML.csv -d /tmp/icio/`"
+        )
 
     print("Loading panel + running AKT pipeline at baseline θ …")
     panel = load_interprov(csv, range(2007, 2016))
     if canus.exists():
-        panel = add_usa_to_panel(panel, load_canada_us_trade(canus))
+        usa_intra = load_usa_intra_per_akt_sector(icio_csv)
+        panel = add_usa_to_panel(panel, load_canada_us_trade(canus), usa_intra)
     hr = head_ries(panel)
     dist, nbr = build_distance_neighbor()
     df, _coef = akt_regression(hr, dist, nbr)

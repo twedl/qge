@@ -8,8 +8,9 @@ given calibration can be traced back to a primary academic estimate.
 This document grows in parts:
 - **Part 1 (done):** original sources of θ and the industry classifications
   each paper estimates against — see "Original sources" below.
-- **Part 2a (TODO):** derive AT-2016 Table 9 from our benchmark (forward
-  problem — AT publish their θ, we just need to find the aggregation).
+- **Part 2a (done):** AT-2016 Table 9 derived from CP-2015 by `derive_at_theta.py`.
+  AT use Full sample + arith / ISIC-count weighted mean — *different from
+  our benchmark column*.
 - **Part 2b (TODO):** infer AKT-2019's effective θ via Head-Ries matching
   (inverse problem — AKT do not publish θ; we back it out from their Tables
   1–2 NG numbers).
@@ -401,54 +402,87 @@ widely-cited reference values.
    holds only under specific assumptions (single-sector CES, no firm-level
    heterogeneity). Use translations with care.
 
-## Part 2a — Derive AT-2016 Table 9 from the benchmark (forward)
+## Part 2a — Derive AT-2016 Table 9 from CP-2015 (forward — DONE)
 
 AT-2016 publish a θ vector for 22 ISIC Rev3 sectors (Table 9, paper p.26).
 AT's footnote: "trade elasticity is from the Caliendo and Parro (2015)
 estimates, averaged up to a slightly higher level of aggregation. Sectors 40
 and above have elasticities of 5, consistent with Costinot and Rodriguez-
-Clare (2014)." This is a **forward problem**: AT tell us they aggregate
-CP-2015, we need to identify *how*.
+Clare (2014)."
 
-Method:
-1. Take the 20-sector benchmark above.
-2. Aggregate to AT-2016's 22 ISIC Rev3 buckets via the AT-row → CP-row
-   concordance (clean except for AT "Wood (20)" + "Paper (21–22)" which split
-   our benchmark Wood vs Paper, and AT "Metals (26–28)" + "Equipment, Vehicles
-   (29–35)" which together cover ISIC 26 through 35).
-3. Try candidate aggregation schemes: simple unweighted mean, trade-weighted
-   mean using CP's per-cell N as weights, harmonic mean of θ.
-4. For AT-2016 rows that exactly match a single benchmark sector (e.g. Wood,
-   Chemicals/Rubber), the aggregation reduces to identity — these are the
-   sanity checks that any candidate scheme has to pass.
-5. Pin down which scheme reproduces AT-2016 Table 9 best. Specifically:
-   - AT's Agriculture-Mining (ISIC 01–14) = 11.92: should match some mean of
-     benchmark Agriculture (9.11) and Mining (13.53). Simple mean = 11.32;
-     gap of 0.6.
-   - AT's Food-Textiles (ISIC 15–19) = 4.56: benchmark Food 2.62 + Textile
-     8.10 → simple mean 5.36; gap of 0.8.
-   - AT's Chemicals-Rubber (ISIC 23–25) = 19.16: benchmark Petroleum 64.85 +
-     Chemicals 3.13 + Plastics 1.67 = simple mean 23.22; if we use the
-     substitution-aware benchmark on petroleum (no substitution applies
-     there), 23.22 → gap of 4. Maybe AT use a different aggregation, or a
-     trade-weighted mean that down-weights petroleum, or a different CP-2015
-     column.
-   - AT's Metals (ISIC 26–28) = 5.02: benchmark Minerals 2.41 + (Basic metals
-     4.49 substitution) + Metal products 6.99 = simple mean 4.63; gap of
-     0.39. Closer.
-   - AT's Equipment-Vehicles (ISIC 29–35) = 6.19: spans ISIC 29 through 35 in
-     our benchmark — 7 sectors with widely-varying θ. Simple mean across
-     benchmark sectors (Machinery 4.49, Office 12.95, Electrical 12.91,
-     Communication 3.95, Medical 8.71, Auto 4.49, Other Transport 0.39) =
-     6.84; gap of 0.65.
+`scripts/derive_at_theta.py` tests 24 combinations of (CP-2015 column,
+aggregation scheme) against AT Table 9. Schemes: simple arithmetic mean of
+θ, harmonic mean of θ, N-weighted (CP's 99%-sample N), ISIC-2-digit-code-
+count weighted. Columns: Full sample, 99% sample, 99% sample + corrections
+(our benchmark), 97.5% sample.
 
-   The pattern of gaps suggests AT may use trade weights or may use a
-   non-benchmark CP column (e.g., Full sample without substitutions) for some
-   rows. Need to test systematically.
+**Convention identified: AT-2016 uses CP-2015's *Full sample* column with
+simple arithmetic mean (essentially identical to ISIC-2-digit-count weighted
+mean — they differ only for the Food+Textiles row, where ISIC-count
+weighting fits AT slightly better).**
 
-Deliverable: a small script (probably `scripts/derive_at_theta.py`) that
-takes the benchmark vector, applies a documented aggregation scheme, and
-produces AT-2016 Table 9. Score by RMSE against published AT values.
+Score on the 8 AT manufacturing rows (RMSE / MAE / exact-to-3-decimals):
+
+| (column, scheme) | RMSE | MAE | exact/8 |
+|---|---|---|---|
+| `(full, ISIC_theta)` | **0.072** | **0.027** | **7** |
+| `(full, arith_theta)` | 0.179 | 0.065 | 7 |
+| `(99sub, arith_theta)` ← benchmark + simple mean | 3.062 | 1.955 | 0 |
+| `(99, arith_theta)` ← 99% raw + simple mean | 3.064 | 1.944 | 0 |
+| `(99sub, ISIC_theta)` ← benchmark + ISIC-weighted | 3.086 | 2.023 | 0 |
+
+Per-sector AT vs derived for the winning scheme `(full, ISIC_theta)`:
+
+| AT sector | ISIC | AT θ | derived θ | residual |
+|---|---|---|---|---|
+| Agriculture, Mining | 01–14 | 11.92 | 11.915 | −0.005 |
+| **Food, Textiles** | 15–19 | **4.56** | **4.356** | **−0.204** |
+| Wood | 20 | 10.83 | 10.830 | 0.000 |
+| Paper | 21–22 | 9.07 | 9.070 | 0.000 |
+| Chemicals, Rubber | 23–25 | 19.16 | 19.163 | +0.003 |
+| Metals | 26–28 | 5.02 | 5.017 | −0.003 |
+| Equipment, Vehicles | 29–35 | 6.19 | 6.191 | +0.001 |
+| Manufacturing, n.e.c. | 36–37 | 5.00 | 5.000 | 0.000 |
+
+### Implication for the benchmark
+
+**AT-2016 does not aggregate the benchmark we defined.** Our benchmark is CP's
+99%-sample column with corrections (basic metals, machinery n.e.c., auto
+overridden by 4.49). AT-2016 instead uses **the Full sample column with no
+corrections** — pulling in 1.52 for Machinery, 1.01 for Auto, 7.99 for Basic
+metals, etc. AT's footnote ("from the Caliendo and Parro (2015) estimates")
+elides this choice; CP-2015 themselves do *not* operationalize the Full
+sample column (they use the 99% sample for the NAFTA simulation, p.20).
+
+**We keep our benchmark unchanged** (it remains the column CP themselves
+adopt, and the natural input for any new calibration). Part 2a records that
+AT use a *different* column from the same paper.
+
+### Unexplained: Food, Textiles
+
+AT publish θ = 4.56 for ISIC 15–19, but no (column, scheme) combination
+tested reproduces it. Closest:
+
+| candidate | derived | residual to 4.56 |
+|---|---|---|
+| `(99, ISIC_invtheta)` | 4.41 | −0.15 |
+| `(full, ISIC_theta)` ← global winner | 4.36 | −0.20 |
+| `(full, arith_theta)` | 4.06 | −0.50 |
+| CP-2015 99%-sample manufacturing aggregate | 4.49 | −0.07 |
+
+Plausible explanations:
+1. **Typo in AT Table 9** — 4.36 → 4.56 is a single-digit transposition.
+2. **External trade-share weights** — AT's own Canadian IO data gives
+   Textile a higher trade share than Food. A 1:2 Food:Textile weighting on
+   the Full sample reproduces 4.56 *exactly* — (1·2.55 + 2·5.56)/3 = 4.557.
+   But the ISIC-2-digit code count weighting (which would be the natural
+   weight without trade data) gives 2:3 (= 4.356), not 1:2.
+3. **Aggregate substitution** — AT replaces Food+Textiles with the CP
+   manufacturing aggregate (4.49), with rounding to 4.56. Unusual choice
+   but explains the value.
+
+We have not chased this further — the global aggregation convention is
+clear, and Food/Textiles is a single outlier worth ≤ 0.2 in any one row.
 
 ## Part 2b — Infer AKT-2019 effective θ via Head-Ries matching (inverse)
 

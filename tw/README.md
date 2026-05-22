@@ -30,17 +30,30 @@ imported from Albrecht-Tombe (2016).
   long-form parquets under `data/inputs/canada_2010/`.
 - **Phase 1 (DONE):** port `initialize_model.m`, `model_equations.m`,
   `solve_model.m`, `eliminate_transfers.m`.
-- **Phase 2 (IN PROGRESS):** port the counterfactual tables (Table 4 done;
-  Tables 5-8 + Figures 2-3 still to port).
+- **Phase 2 (DONE):** all paper counterfactuals — Tables 4, 5, 6, 7, 8 +
+  Figures 2, 3 ported and verified against the working paper.
 - **Phase 3 (TODO):** fetch `FiscalData` directly from StatCan WDS API to
-  avoid the manual RData dependency.
+  avoid the manual RData dependency. Port `Table1.R` and `Table2.R`.
 
-## Table 4 — acceptance test ✓
+## Acceptance tests ✓
 
-`scripts/table4.py` reproduces every cell of Table 4 to one decimal place
-against both the published CJE 2021 version (vol 54(2), pp.522-556) and the
-August 2019 working paper at
-https://www.trevortombe.com/files/tombe_winter_2019.pdf .
+Every paper table and figure reproduces the published values to within
+±0.1pp. Reference values are from the August 2019 working paper at
+https://www.trevortombe.com/files/tombe_winter_2019.pdf and the published
+CJE 2021 version (vol 54(2), pp.522-556).
+
+| Script | Replicates | Status |
+|---|---|---|
+| `scripts/table4.py` | Effect of interprovincial transfers (all / equalization / income-sensitive) | ✓ all cells match |
+| `scripts/table5.py` | Gains from observed trade relative to autarky | ✓ all cells match |
+| `scripts/table6.py` | Gains from lower internal trade costs (asym / non-distance / all) | ✓ all cells match |
+| `scripts/table7.py` | Unilateral import vs export cost reductions per province | ✓ all cells match (within 0.1pp rounding) |
+| `scripts/table8.py` | Bilateral trade liberalization (New West / ON-QC / Maritime) | ✓ both panels match |
+| `scripts/figure2.py` | Welfare-maximizing ζ across fiscal-integration sweep | ✓ ζ* = −0.24 (a), −0.35 (b) |
+| `scripts/figure3.py` | Per-sector output change vs upstreamness for AB and PE | ✓ data matches; plot externally |
+
+Figure scripts write data CSVs to `data/outputs/`; rendering plots is left
+to downstream code.
 
 ## Layout
 

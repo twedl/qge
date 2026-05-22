@@ -4,10 +4,11 @@ Python implementations of quantitative general-equilibrium models from the Calie
 
 ## Sub-projects
 
-| dir | model | reference | status |
-|---|---|---|---|
-| [`cprhs/`](cprhs/) | Caliendo, Parro, Rossi-Hansberg, Sarte — *The Impact of Regional and Sectoral Productivity Changes in the U.S. Economy* | [author site](https://sites.google.com/site/lorenzocaliendo/research/CPRHS) | working; verified to MATLAB workspaces at machine epsilon; ships a CPRHS reference calibration and a Canadian calibration (`canada_2021`) plus an extended 17-region partner version |
-| [`cdp/`](cdp/) | Caliendo, Dvorkin, Parro — dynamic labor-market trade model | [author site](https://sites.google.com/site/lorenzocaliendo/research/cdp) | Phase 1 + Phase 2 + Phase 3 done (static base year, full dynamic baseline 2000-forward, China-shock counterfactual); employment/welfare analysis next |
+| dir | model | reference | data archive | status |
+|---|---|---|---|---|
+| [`cprhs/`](cprhs/) | Caliendo, Parro, Rossi-Hansberg, Sarte — *The Impact of Regional and Sectoral Productivity Changes in the U.S. Economy* | [author site](https://sites.google.com/site/lorenzocaliendo/research/CPRHS) | — | working; verified to MATLAB workspaces at machine epsilon; ships a CPRHS reference calibration and a Canadian calibration (`canada_2021`) plus an extended 17-region partner version |
+| [`cdp/`](cdp/) | Caliendo, Dvorkin, Parro — dynamic labor-market trade model | [author site](https://sites.google.com/site/lorenzocaliendo/research/cdp) | — | Phase 1 + Phase 2 + Phase 3 done (static base year, full dynamic baseline 2000-forward, China-shock counterfactual); employment/welfare analysis next |
+| [`tw/`](tw/) | Tombe & Winter — *Fiscal Integration with Internal Trade: Quantifying the Effects of Federal Transfers in Canada* | *Canadian Journal of Economics* 54(2), 522–556 ([doi:10.1111/caje.12491](https://doi.org/10.1111/caje.12491)) | Tombe & Winter (2022), Borealis, V1 ([doi:10.5683/SP3/SHDOHY](https://doi.org/10.5683/SP3/SHDOHY)) | complete; every published table and figure replicated end-to-end from the Dataverse archive |
 
 ## Working in a sub-project
 
@@ -21,6 +22,6 @@ Each sub-project has its own `pyproject.toml`, `qge/` package, `data/`, `scripts
 
 ## Repository-wide files
 
-`CLAUDE.md` — coding guidelines that apply to both projects.
+`CLAUDE.md` — coding guidelines that apply to all sub-projects.
 `LICENSE` — MIT, applies to all code.
-`.gitignore` — Python / venv / OS clutter, plus MATLAB source folder under `cprhs/`.
+`.gitignore` — Python / venv / OS clutter, plus MATLAB source folders.

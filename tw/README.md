@@ -32,8 +32,7 @@ imported from Albrecht-Tombe (2016).
   `solve_model.m`, `eliminate_transfers.m`.
 - **Phase 2 (DONE):** all paper counterfactuals — Tables 4, 5, 6, 7, 8 +
   Figures 2, 3 ported and verified against the working paper.
-- **Phase 3 (TODO):** fetch `FiscalData` directly from StatCan WDS API to
-  avoid the manual RData dependency. Port `Table1.R` and `Table2.R`.
+- **Phase 3 (DONE):** StatCan WDS fetcher + Tables 1 and 2 in Python.
 
 ## Acceptance tests ✓
 
@@ -51,6 +50,9 @@ CJE 2021 version (vol 54(2), pp.522-556).
 | `scripts/table8.py` | Bilateral trade liberalization (New West / ON-QC / Maritime) | ✓ both panels match |
 | `scripts/figure2.py` | Welfare-maximizing ζ across fiscal-integration sweep | ✓ ζ* = −0.24 (a), −0.35 (b) |
 | `scripts/figure3.py` | Per-sector output change vs upstreamness for AB and PE | ✓ data matches; plot externally |
+| `scripts/table1.py`  | Federal revenue/expenditure per-capita gaps, 2007–2016 | ✓ all cells match |
+| `scripts/table2.py`  | Shapley decomposition of fiscal-transfer sources | ✓ GDP-% and transfer-% columns match exactly; correlation column matches to within ±0.2 |
+| `scripts/fetch_fiscal_data.py` | Refresh `fiscal_*.parquet` from StatCan WDS API | runs on demand; replaces the .RData dependency |
 
 Figure scripts write data CSVs to `data/outputs/`; rendering plots is left
 to downstream code.

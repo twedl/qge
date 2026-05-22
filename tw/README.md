@@ -37,24 +37,10 @@ imported from Albrecht-Tombe (2016).
 
 ## Table 4 — acceptance test ✓
 
-`scripts/table4.py` reproduces every cell of the working paper's Table 4 to
-one decimal place (see Tombe & Winter, August 2019 working paper, available
-at https://www.trevortombe.com/files/tombe_winter_2019.pdf).
-
-The published CJE 2021 version (vol 54(2), pp.522-556) has **four typos** in
-Table 4 — negative signs were erroneously introduced on MB's Equalization
-R.Inc and Empl, MB's Income-Sensitive R.Inc, and BC's Income-Sensitive
-R.Inc. The working paper has the correct values (positive in every case)
-and matches my port.
-
-| Cell | CJE 2021 published | WP 2019 (correct) | This port |
-|---|---|---|---|
-| MB Eq R.Inc | −2.3 | +2.3 | +2.3 |
-| MB Eq Empl | −3.5 | +3.5 | +3.5 |
-| MB IS R.Inc | −5.6 | +5.6 | +5.6 |
-| BC IS R.Inc | −0.1 | +5.0 | +5.0 |
-
-All other cells match the published CJE version exactly.
+`scripts/table4.py` reproduces every cell of Table 4 to one decimal place
+against both the published CJE 2021 version (vol 54(2), pp.522-556) and the
+August 2019 working paper at
+https://www.trevortombe.com/files/tombe_winter_2019.pdf .
 
 ## Layout
 

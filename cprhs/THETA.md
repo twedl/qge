@@ -484,6 +484,25 @@ Plausible explanations:
 We have not chased this further — the global aggregation convention is
 clear, and Food/Textiles is a single outlier worth ≤ 0.2 in any one row.
 
+### Downstream: Tombe & Winter (2021) reuse AT-2016 Table 9 verbatim
+
+Tombe & Winter (2021, *Canadian Journal of Economics* 54(2), 522–556) adopt
+the AT-2016 Table 9 θ vector **as-is** for their 22-sector Canadian
+calibration. The values appear in:
+
+- the data appendix (Borealis [doi:10.5683/SP3/SHDOHY](https://doi.org/10.5683/SP3/SHDOHY)
+  archive) as the `theta` variable in `maindata.mat`,
+- Table 10 (p.33) of the August 2019 working paper
+  (https://www.trevortombe.com/files/tombe_winter_2019.pdf), reprinted in
+  human-readable form,
+- the published CJE 2021 article only in prose (p.540), citing CP-2015 +
+  CRC-2014 without listing values.
+
+The published article's `tw/data/inputs/canada_2010/sectoral_dispersion.parquet`
+in our port stores `T_j = 1/θ^j` from the same numbers. So the provenance
+chain CP-2015 → AT-2016 → TW-2021 is a literal copy-paste at each step —
+no re-aggregation between AT and TW.
+
 ## Part 2b — Infer AKT-2019 effective θ via Head-Ries matching (inverse)
 
 AKT-2019 do **not** publish their θ vector. Their Tables 1–2 report

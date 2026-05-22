@@ -26,6 +26,7 @@ Conventions (all 0-indexed in Python; 1-indexed in MATLAB):
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -33,9 +34,9 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
-DEFAULT_CALIBRATION = (
-    Path(__file__).resolve().parent.parent / "data" / "inputs" / "canada_2010"
-)
+_INPUTS_ROOT = Path(__file__).resolve().parent.parent / "data" / "inputs"
+# Override via TW_CALIBRATION env var (e.g. TW_CALIBRATION=canada_2022).
+DEFAULT_CALIBRATION = _INPUTS_ROOT / os.environ.get("TW_CALIBRATION", "canada_2010")
 
 
 @dataclass(frozen=True)

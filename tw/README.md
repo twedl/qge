@@ -30,8 +30,51 @@ Caliendo & Parro (2015) multi-sector hat-algebra trade model **plus**:
 - Exogenous transfers `T̄_n` from StatCan 36-10-0450 (federal revenue and
   spending by province).
 
-11 regions (10 provinces + Rest of World), 22 sectors, 2010 vintage. Trade
-costs come from Albrecht & Tombe (2016).
+11 regions (10 provinces + Rest of World), 22 sectors. Two calibrations
+ship: `canada_2010/` (the paper's published vintage) and `canada_2022/`
+(refreshed; see [Calibrations](#calibrations) below). Trade costs come
+from Albrecht & Tombe (2016).
+
+## Calibrations
+
+| dir | year | source | notes |
+|---|---|---|---|
+| `data/inputs/canada_2010/` | 2010 | `maindata.mat` + `FiscalData.RData` (Borealis archive) | paper baseline |
+| `data/inputs/canada_2022/` | 2022 | StatCan WDS + OECD ICIO 2023 release | latest data; built by `scripts/build_canada_2022.py` |
+
+Run any script against either calibration via the `TW_CALIBRATION` env
+var (defaults to `canada_2010`):
+
+```sh
+TW_CALIBRATION=canada_2022 uv run python scripts/table4.py
+```
+
+The 2022 calibration **refreshes** the fast-moving primitives —
+bilateral trade flows (StatCan 12-10-0088), employment shares (LFS
+14-10-0327), real income index (GDP 36-10-0222 + spatial prices
+18-10-0003), fiscal transfers (36-10-0450), and WLD-WLD intra trade
+(ICIO 2022) — and **carries over** the slow-moving industrial structure
+(α, γ, φ, IO matrix), the AT-2016 trade-cost shocks
+(`tauhat_all/asym/dist`), and the θ vector from the 2010 calibration.
+Industrial composition is slow-moving (≈ 12-year drift since 2010);
+re-estimating AT-2016's trade-cost pipeline on 2022 data is Phase 4b.
+
+Selected 2010 → 2022 changes (Table 4, All fiscal transfers, % effect
+on real income):
+
+| Prov | 2010 | 2022 |
+|---|---|---|
+| AB | -8.3 | -5.5 |
+| ON | -0.8 | -1.6 |
+| QC | +3.4 | +5.0 |
+| NB | +15.6 | +19.5 |
+| NS | +17.1 | +21.3 |
+| PE | +29.8 | +32.0 |
+| NL | +10.4 | +7.7 |
+| **CAN aggregate** | **-0.74** | **-0.34** |
+
+Alberta's transfer-induced income loss narrows after the 2014 oil price
+collapse; Maritime gains widen; aggregate national cost roughly halves.
 
 ## Acceptance tests ✓
 

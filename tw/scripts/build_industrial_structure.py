@@ -1,32 +1,29 @@
-"""Derive TW industrial-structure primitives from StatCan provincial L97 IOTs.
+"""Derive TW industrial-structure primitives from StatCan provincial IOTs.
 
 Builds α (final-demand share), γ (regional intermediate share), φ (labor /
 value-added share), and the national IO matrix at TW's 22-sector ISIC Rev 3
-taxonomy from the provincial Symmetric Input-Output Tables (StatCan 15-211-X,
-year 2021 — the latest published vintage).
+taxonomy from the provincial Symmetric Input-Output Tables (StatCan 15-211-X).
 
-Writes four parquets into ``data/inputs/canada_2022/``, replacing the
-canada_2010 carry-overs that Phase 4a shipped with:
+Writes four parquets into ``data/inputs/canada_2022/``:
 
     final_demand_share.parquet   α (J, N)
-    intermediate_share.parquet   γ (J, J, N)  -- regional, NEW
+    intermediate_share.parquet   γ (J, J, N)  -- regional
     labor_share.parquet          φ (J, N)
     io_matrix.parquet            national IO (J, J)
 
-Source: 14 provincial/territorial L97 xlsx workbooks inside
-``15-211-X_2021 Provincial Symmetric IOTs.zip``. Each workbook has a
-``BasicPrice`` sheet whose first 186 rows are industry codes (BS / NP / GS
-prefix); columns 0..185 are the symmetric intermediate-use block followed
-by final-demand columns.
+Source: provincial workbooks (one per province) from StatCan 15-211-X at
+the chosen aggregation level — Detail (D, ~220 industries) or Link-1997
+(L97, 186 industries). Each workbook has a ``BasicPrice`` sheet whose
+first rows are industry codes (BS / NP / GS prefix); the leading columns
+are the symmetric intermediate-use block followed by final-demand columns.
 
-The ROW row (WLD region in TW's 11-region setup) is the Canadian average,
-matching the canada_2010 convention. Territories are excluded — only the
-10 provinces feed Canadian averages.
+The WLD region (Rest-of-World in TW's 11-region setup) is the Canadian
+average. Territories are excluded — only the 10 provinces feed averages.
 
-Run from tw/:
+Run from tw/ (current 2022 Detail-level vintage):
     uv run python scripts/build_industrial_structure.py \\
-        --iot-zip "$HOME/Downloads/15-211-X_2021 Provincial Symmetric IOTs.zip" \\
-        --year 2021
+        --iot-zip "$HOME/Downloads/2022-20260522T154200Z-3-001.zip" \\
+        --year 2022 --level D
 """
 
 from __future__ import annotations
@@ -80,30 +77,49 @@ SECTORS: tuple[str, ...] = (
     "Other Services",
 )
 
-_N_INDUSTRY_COLS = 186
+_INDUSTRY_PREFIXES: tuple[str, ...] = ("BS", "NP", "GS")
+
+
+def _count_industry_rows(sheet: pd.DataFrame) -> int:
+    """Number of leading rows whose label has an industry prefix (BS/NP/GS).
+    L97 has 186; Detail has ~220; Summary has ~32."""
+    n = 0
+    for code in sheet.index:
+        if isinstance(code, str) and code[:2] in _INDUSTRY_PREFIXES:
+            n += 1
+        else:
+            break
+    return n
 
 
 def _l97_to_tw_sector(code: str) -> str | None:
-    """Map an L97 industry code to one of TW's 22 ISIC Rev 3 sectors.
+    """Map an L97 / Detail-level industry code to TW's 22 ISIC Rev 3 sectors.
 
-    NAICS → ISIC Rev 3 concordance (TW Table 9):
+    Concordance handles both NAICS 2017 (used in L97 vintages 2014-2021) and
+    NAICS 2022 (used in 2022+ Detail). The Information sector (NAICS 51) was
+    restructured in NAICS 2022:
+
+      NAICS 2017     →  NAICS 2022    →  TW sector
+      511 publishing →  513 publishing → Paper (5131xx) / Software (513200)
+      515 broadcast  →  516 broadcast  → Other Services
+      519 other info →  519 other info → Other Services
+
+    Other ISIC Rev 3 mapping (TW Table 9):
       NAICS 11,21         → 01-14 Agriculture, Mining
       NAICS 22            → 40-41 Utilities
       NAICS 23            → 45 Construction
-      NAICS 31* (food/tex)→ 15-19 Food, Textiles
+      NAICS 31* (food)    → 15-19 Food, Textiles
       NAICS 321           → 20 Wood
-      NAICS 322,323       → 21-22 Paper (paper + printing/publishing)
+      NAICS 322,323       → 21-22 Paper (paper + printing)
       NAICS 324-326       → 23-25 Chemicals, Rubber
-      NAICS 327,331,332   → 26-28 Metals (non-metallic min + metals)
+      NAICS 327,331,332   → 26-28 Metals
       NAICS 333-336       → 29-35 Equipment, Vehicles
       NAICS 337,339       → 36-37 Manufacturing, n.e.c.
       NAICS 41,44,45      → 50-52 Wholesale and Retail
       NAICS 48,49         → 60-63 Transport
-      NAICS 511 (ex-5112) → 22 Paper (publishing)
-      NAICS 5112          → 72 Software
-      NAICS 512,515       → 92 Other Services (motion picture, broadcasting)
+      NAICS 512           → 92 Other Services (motion picture)
       NAICS 517,51A       → 64 Communication
-      NAICS 518           → 72 Software (data processing)
+      NAICS 518           → 72 Software (data processing/cloud)
       NAICS 52            → 65-67 Finance
       NAICS 53            → 70-71 Real Estate
       NAICS 5415          → 72 Software (computer systems design)
@@ -123,7 +139,7 @@ def _l97_to_tw_sector(code: str) -> str | None:
     if p2 == "GS":
         if body.startswith("61"):
             return "Education"
-        if body.startswith(("622", "623")):
+        if body.startswith("62"):  # NAICS 62 = health + social assistance (incl. 62A aggregates)
             return "Health and Social"
         if body.startswith("91"):
             return "Public Admin."
@@ -162,10 +178,25 @@ def _l97_to_tw_sector(code: str) -> str | None:
         return "Wholesale and Retail"
     if b2 in ("48", "49"):
         return "Transport"
+    # NAICS 2017 Information sector (used in L97 vintages 2014-2021)
     if b3 == "511":
         return "Software" if body.startswith("511200") else "Paper"
     if b3 in ("512", "515"):
         return "Other Services"
+    # NAICS 2022 Information sector reorganization
+    if b3 == "513":
+        # NAICS 2022 moved publishing 511 → 513. 5131xx = print/digital publishing
+        # (newspaper/periodical/book/directory) → Paper; 513200 = software
+        # publishers → Software.
+        return "Software" if body.startswith("513200") else "Paper"
+    if b3 == "516":
+        # NAICS 2022 created 516 for broadcasting + content providers
+        # (incl. media streaming, was 515 in NAICS 2017).
+        return "Other Services"
+    if b3 == "519":
+        # NAICS 2022 519 = web search, libraries, archives, other info services.
+        return "Other Services"
+    # Common
     if body.startswith("51A") or b3 == "517":
         return "Communication"
     if b3 == "518":
@@ -195,13 +226,24 @@ def _l97_to_tw_sector(code: str) -> str | None:
     return None
 
 
-def _extract_zip(iot_zip: Path, work_dir: Path, year: int) -> dict[str, Path]:
-    """Extract the 10 provincial L97 workbooks."""
+def _extract_zip(iot_zip: Path, work_dir: Path, year: int, level: str) -> dict[str, Path]:
+    """Extract the 10 provincial workbooks for ``level`` ∈ {L97, D}.
+
+    Two StatCan naming conventions are supported:
+      - L97 (pre-2022): ``Link-1997 level/IOTs provincial symmetric XX L97 YYYY.xlsx``
+      - Detail (2022+): ``{year}/Detail level/IOT provincial XX D YYYY.xlsx``
+    """
     work_dir.mkdir(parents=True, exist_ok=True)
+    if level == "L97":
+        prefix, infix, suffix = "Link-1997 level/", "IOTs provincial symmetric ", " L97 "
+    elif level == "D":
+        prefix, infix, suffix = f"{year}/Detail level/", "IOT provincial ", " D "
+    else:
+        raise ValueError(f"unknown level={level!r}; expected 'L97' or 'D'")
     out: dict[str, Path] = {}
     with zipfile.ZipFile(iot_zip, "r") as zf:
         for region in PROVINCE_CODE_TO_NAME:
-            entry = f"Link-1997 level/IOTs provincial symmetric {region} L97 {year}.xlsx"
+            entry = f"{prefix}{infix}{region}{suffix}{year}.xlsx"
             target = work_dir / Path(entry).name
             if not target.exists():
                 with zf.open(zf.getinfo(entry)) as src, target.open("wb") as dst:
@@ -246,10 +288,11 @@ def _aggregate_rows(sheet: pd.DataFrame, mapping: list[tuple[str, str]]) -> pd.D
 def _aggregate_industry_cols(
     sheet: pd.DataFrame, mapping: list[tuple[str, str]]
 ) -> pd.DataFrame:
-    """Sum the first 186 industry columns from L97 → TW 22 sectors."""
+    """Sum the leading industry columns from L97/Detail → TW 22 sectors."""
+    n_ind = _count_industry_rows(sheet)
     out = pd.DataFrame(0.0, index=sheet.index, columns=list(SECTORS))
     code_to_sector = dict(mapping)
-    col_codes = list(sheet.index[:_N_INDUSTRY_COLS])
+    col_codes = list(sheet.index[:n_ind])
     for pos, code in enumerate(col_codes):
         if code in code_to_sector:
             out[code_to_sector[code]] = out[code_to_sector[code]].add(
@@ -263,8 +306,9 @@ def _provincial_jj(sheet: pd.DataFrame, mapping: list[tuple[str, str]]) -> pd.Da
 
     Rows = supplying sectors, columns = using sectors.
     """
+    n_ind = _count_industry_rows(sheet)
     industry_codes = [c for c, _ in mapping]
-    sub = sheet.loc[industry_codes].iloc[:, :_N_INDUSTRY_COLS]
+    sub = sheet.loc[industry_codes].iloc[:, :n_ind]
     row_agg = _aggregate_rows(sub, mapping)
     col_agg = pd.DataFrame(0.0, index=list(SECTORS), columns=list(SECTORS))
     sector_for = dict(mapping)
@@ -338,66 +382,94 @@ def build_intermediate_share(
     return gamma_df, io_df
 
 
-def build_labor_share(iots: dict[str, pd.DataFrame]) -> pd.DataFrame:
+_PRIMARY_INPUT_CODES: tuple[str, ...] = (
+    "PRM300000",  # Subsidies on production (negative)
+    "PRM400000",  # Taxes on production
+    "PRM500000",  # Wages
+    "PRM600000",  # Employers' social contributions
+    "PRM700000",  # Gross mixed income
+    "PRM800000",  # Gross operating surplus
+)
+
+
+def build_labor_share(
+    iots: dict[str, pd.DataFrame], national: bool = False
+) -> pd.DataFrame:
     """φ^j_n = primary inputs / total cost per (sector, region).
 
-    Primary inputs = labour comp + employers' SS + mixed income + GOS +
-    production taxes (less subsidies). Equals 1 - intermediate share.
+    If ``national=False`` (default), each province carries its own observed
+    φ vector and WLD gets the Canadian-aggregate value (production-weighted).
+
+    If ``national=True``, the Canadian-aggregate φ is replicated across every
+    province (and WLD) — matches canada_2010 / AT-2016 / OECD-STAN convention
+    treating φ as a structural production-function parameter.
     """
-    primary_codes = (
-        "PRM300000",  # Subsidies on production (negative)
-        "PRM400000",  # Taxes on production
-        "PRM500000",  # Wages
-        "PRM600000",  # Employers' social contributions
-        "PRM700000",  # Gross mixed income
-        "PRM800000",  # Gross operating surplus
-    )
     rows = []
-    sector_totals: dict[str, list[float]] = {s: [] for s in SECTORS}
+    primary_by_region: dict[str, pd.Series] = {}
+    total_by_region: dict[str, pd.Series] = {}
     for code, sheet in iots.items():
         mapping = _industry_mapping(sheet)
         col_agg = _aggregate_industry_cols(sheet, mapping)
-        primary = col_agg.loc[list(primary_codes)].sum(axis=0)
-        total = col_agg.loc["TOTAL"]
-        phi = (primary / total.where(total > 0, 1.0)).clip(lower=0.0, upper=0.99)
+        primary_by_region[code] = col_agg.loc[list(_PRIMARY_INPUT_CODES)].sum(axis=0)
+        total_by_region[code] = col_agg.loc["TOTAL"]
+
+    canada_primary = sum(primary_by_region.values())
+    canada_total = sum(total_by_region.values())
+    canada_phi = (canada_primary / canada_total.where(canada_total > 0, 1.0)
+                  ).clip(lower=0.0, upper=0.99)
+
+    for code in PROVINCE_CODE_TO_NAME:
+        if national:
+            phi = canada_phi
+        else:
+            phi = (primary_by_region[code]
+                   / total_by_region[code].where(total_by_region[code] > 0, 1.0)
+                   ).clip(lower=0.0, upper=0.99)
         for sector in SECTORS:
-            v = float(phi[sector])
-            rows.append({"sector": sector, "region": code, "value": v})
-            sector_totals[sector].append(v)
+            rows.append({"sector": sector, "region": code, "value": float(phi[sector])})
 
     for sector in SECTORS:
-        rows.append({
-            "sector": sector,
-            "region": WLD,
-            "value": float(np.mean(sector_totals[sector])),
-        })
+        rows.append({"sector": sector, "region": WLD, "value": float(canada_phi[sector])})
     return pd.DataFrame(rows).sort_values(["sector", "region"]).reset_index(drop=True)
+
+
+_FINAL_DEMAND_PREFIXES: tuple[str, ...] = (
+    "PEC",  # household consumption (COICOP detail)
+    "CEN",  # NPISH consumption
+    "CEG",  # government consumption
+    "COB", "COG", "COH",  # construction investment (non-res / govt / residential)
+    "MEB", "MEG", "MEN",  # machinery and equipment investment
+    "IPB", "IPG", "IPN",  # intellectual-property investment
+    "INV",                # change in inventories
+)
 
 
 def build_final_demand_share(
     iots: dict[str, pd.DataFrame], col_codes: dict[str, list]
 ) -> pd.DataFrame:
-    """α^j_n = sector j's share of (household + NPISH + government) consumption.
+    """α^j_n = sector j's share of domestic final demand (ex-exports).
 
-    Uses BasicPrice rows × final-consumption columns (PEC*, CEN*, CEG*).
-    Excludes investment, inventory, trade — Cobb-Douglas final-demand convention.
+    Uses BasicPrice rows × all domestic final-demand columns: consumption
+    (PEC/CEN/CEG) + investment (COB/COG/COH for construction, MEB/MEG/MEN for
+    M&E, IPB/IPG/IPN for IP) + inventories (INV). Excludes interprovincial /
+    international trade columns. Matches AT-2016 β^j convention (where e.g.
+    Construction β ≈ 0.13 reflects residential investment).
     """
     rows = []
     canada_alpha = pd.Series(0.0, index=list(SECTORS))
     for code, sheet in iots.items():
         codes = col_codes[code]
-        consumption_cols = [
+        fd_cols = [
             i for i, c in enumerate(codes)
-            if isinstance(c, str)
-            and (c.startswith("PEC") or c.startswith("CEN") or c.startswith("CEG"))
+            if isinstance(c, str) and c.startswith(_FINAL_DEMAND_PREFIXES)
         ]
         mapping = _industry_mapping(sheet)
         row_agg = _aggregate_rows(
             sheet.loc[[c for c, _ in mapping]], mapping
         )
-        consumption_by_sector = row_agg.iloc[:, consumption_cols].sum(axis=1).clip(lower=0.0)
-        total = consumption_by_sector.sum()
-        alpha = consumption_by_sector / total if total > 0 else consumption_by_sector
+        fd_by_sector = row_agg.iloc[:, fd_cols].sum(axis=1).clip(lower=0.0)
+        total = fd_by_sector.sum()
+        alpha = fd_by_sector / total if total > 0 else fd_by_sector
         for sector in SECTORS:
             rows.append({"sector": sector, "region": code, "value": float(alpha[sector])})
             canada_alpha[sector] += alpha[sector]
@@ -413,21 +485,32 @@ def main() -> None:
     parser.add_argument(
         "--iot-zip",
         type=Path,
-        default=Path.home()
-        / "Downloads"
-        / "15-211-X_2021 Provincial Symmetric IOTs.zip",
+        default=Path.home() / "Downloads" / "2022-20260522T154200Z-3-001.zip",
     )
-    parser.add_argument("--year", type=int, default=2021)
+    parser.add_argument("--year", type=int, default=2022)
+    parser.add_argument(
+        "--level",
+        choices=("D", "L97"),
+        default="D",
+        help="StatCan aggregation level. D = Detail (~220 industries, 2022+); "
+             "L97 = Link-1997 level (186 industries, pre-2022).",
+    )
     parser.add_argument("--work-dir", type=Path, default=Path("/tmp/statcan_iot"))
     parser.add_argument(
         "--out-dir",
         type=Path,
         default=Path(__file__).resolve().parent.parent / "data" / "inputs" / "canada_2022",
     )
+    parser.add_argument(
+        "--phi-national",
+        action="store_true",
+        help="Use Canadian-aggregate φ replicated across provinces (matches "
+             "canada_2010 / AT-2016 convention). Default: regional φ.",
+    )
     args = parser.parse_args()
 
-    print(f"Extracting {args.year} L97 workbooks from {args.iot_zip.name}...")
-    paths = _extract_zip(args.iot_zip, args.work_dir, args.year)
+    print(f"Extracting {args.year} {args.level} workbooks from {args.iot_zip.name}...")
+    paths = _extract_zip(args.iot_zip, args.work_dir, args.year, args.level)
 
     basicprice: dict[str, pd.DataFrame] = {}
     col_codes: dict[str, list] = {}
@@ -438,8 +521,8 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Building labor_share.parquet...")
-    phi_df = build_labor_share(basicprice)
+    print(f"Building labor_share.parquet (national={args.phi_national})...")
+    phi_df = build_labor_share(basicprice, national=args.phi_national)
     phi_df.to_parquet(args.out_dir / "labor_share.parquet", index=False)
 
     print("Building intermediate_share.parquet + io_matrix.parquet...")

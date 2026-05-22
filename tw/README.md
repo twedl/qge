@@ -49,32 +49,56 @@ var (defaults to `canada_2010`):
 TW_CALIBRATION=canada_2022 uv run python scripts/table4.py
 ```
 
-The 2022 calibration **refreshes** the fast-moving primitives —
-bilateral trade flows (StatCan 12-10-0088), employment shares (LFS
-14-10-0327), real income index (GDP 36-10-0222 + spatial prices
-18-10-0003), fiscal transfers (36-10-0450), and WLD-WLD intra trade
-(ICIO 2022) — and **carries over** the slow-moving industrial structure
-(α, γ, φ, IO matrix), the AT-2016 trade-cost shocks
-(`tauhat_all/asym/dist`), and the θ vector from the 2010 calibration.
-Industrial composition is slow-moving (≈ 12-year drift since 2010);
-re-estimating AT-2016's trade-cost pipeline on 2022 data is Phase 4b.
+The 2022 calibration **refreshes**:
+- Bilateral trade flows (StatCan 12-10-0088, 2022).
+- Employment shares (StatCan 14-10-0327 active LFS, 2022).
+- Real income index (StatCan 36-10-0222 GDP + 18-10-0003 spatial prices).
+- Fiscal transfers (StatCan 36-10-0450, multi-year average).
+- WLD-WLD intra-trade (OECD ICIO 2023 release, year 2022).
+- **Industrial structure α, γ, φ, IO matrix** — built by
+  `scripts/build_industrial_structure.py` from 2021 L97 provincial
+  Supply-Use tables (StatCan 15-211-X). γ varies by region (canada_2010
+  replicated a single national matrix across all 11 regions). The IO
+  matrix is constructed as γ × (1 − φ) at the Canadian aggregate so
+  that columns sum to (1 − φ^j), matching the canada_2010 convention.
+
+The provincial IOTs lag 2-3 years, so 2022-data primitives sit on top
+of 2021 industrial structure — a slow-moving structure with ~1y mismatch.
+
+What's still carried over from canada_2010/:
+- AT-2016 trade-cost shocks (`tauhat_all/asym/dist`) — re-estimating
+  these on 2022 data is Phase 4b.
+- Sectoral dispersion `θ^j` (AT-2016 / CP-2015 vector, static).
+- Sector labels.
+
+A small baseline accounting residual (∑ S_n ≈ 3·10⁻⁴ I) persists
+because trade flows and IO are now built from independent StatCan
+sources without joint calibration. canada_2010's maindata.mat jointly
+calibrated π so that ∑ S_n = machine epsilon; we accept the residual
+in exchange for direct data lineage.
 
 Selected 2010 → 2022 changes (Table 4, All fiscal transfers, % effect
 on real income):
 
 | Prov | 2010 | 2022 |
 |---|---|---|
-| AB | -8.3 | -5.5 |
-| ON | -0.8 | -1.6 |
-| QC | +3.4 | +5.0 |
-| NB | +15.6 | +19.5 |
-| NS | +17.1 | +21.3 |
-| PE | +29.8 | +32.0 |
-| NL | +10.4 | +7.7 |
-| **CAN aggregate** | **-0.74** | **-0.34** |
+| BC | -1.7 | -2.2 |
+| AB | -8.3 | -6.7 |
+| SK | -0.9 | +0.8 |
+| MB | +7.2 | +12.3 |
+| ON | -0.8 | +2.6 |
+| QC | +3.4 | +6.7 |
+| NB | +15.6 | +41.6 |
+| NS | +17.1 | +26.2 |
+| PE | +29.8 | +26.2 |
+| NL | +10.4 | -5.0 |
+| **CAN aggregate** | **-0.74** | **+1.13** |
 
-Alberta's transfer-induced income loss narrows after the 2014 oil price
-collapse; Maritime gains widen; aggregate national cost roughly halves.
+Alberta's transfer-induced income loss narrows; Maritime gains widen
+sharply (NB more than doubles); Newfoundland flips from net beneficiary
+to net loser as its oil-driven income premium fades. The CAN aggregate
+flips sign: transfers now generate a small net welfare gain at the
+national level (vs. a small net deadweight cost in 2010).
 
 ## Acceptance tests ✓
 

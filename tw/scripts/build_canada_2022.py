@@ -14,13 +14,12 @@ What's refreshed (the fast-moving primitives):
 - Synthetic WLD region from ICIO 2022 non-Canada aggregate (for the
   WLD column of bilateral_trade only).
 
+Industrial structure (α^j_n, γ^{k,j}_n, φ^j_n, IO matrix) is built by a
+companion script: ``scripts/build_industrial_structure.py``, which reads
+2021 L97 provincial Supply-Use tables (StatCan 15-211-X — the latest
+published vintage; provincial IOTs lag 2-3 years).
+
 What's NOT refreshed (carried over from canada_2010/):
-- Industrial structure (α^j_n, γ^{k,j}_n, φ^j_n, IO matrix). Provincial
-  α/γ/φ data is not available in ICIO at the granularity TW requires,
-  and the maindata.mat values were jointly calibrated to satisfy the
-  model's accounting identities. Industrial composition is slow-moving
-  (≈ 12 years of drift since 2010), so 2010 values remain serviceable
-  while we wait for a proper provincial-IO source.
 - Trade-cost shocks ``tauhat_all`` / ``tauhat_asym`` / ``tauhat_dist`` —
   AT-2016 outputs from 2010 trade data; re-estimating them is Phase 4b.
 - Trade elasticities ``θ^j`` — AT-2016 / CP-2015 vector, static.

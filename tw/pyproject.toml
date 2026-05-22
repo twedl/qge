@@ -9,6 +9,7 @@ dependencies = [
     "pandas>=2.0",
     "pyarrow>=15.0",
     "pyreadr>=0.5",
+    "openpyxl>=3.1.5",
 ]
 
 [dependency-groups]

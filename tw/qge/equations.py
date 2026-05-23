@@ -60,6 +60,11 @@ def model_equations(
     tauhat: np.ndarray | None = None,   # (N*J, N), default ones
     Ahat: np.ndarray | None = None,     # (1, N*J), default ones
     Sn_override: np.ndarray | None = None,   # if set, use as new Sn (e.g. Sn0 + Sn_EQ)
+    frozen_idx: tuple[int, ...] = (),    # province indices with exogenous labor
+                                          # (like WLD). They get lambda2_p = lambda_p
+                                          # and dL_p = 1; the Frechet pool is
+                                          # restricted to the remaining provinces
+                                          # sharing (1 - Σ_{frozen} λ) workers.
 ) -> ModelOutputs:
     """One pass of the hat-algebra inner loop. Returns all derived quantities.
 
@@ -165,7 +170,19 @@ def model_equations(
     # Migration: lambda2 = lambda * Uhat^κ / sum(lambda * Uhat^κ)
     Uhat_provs = Uhat[: N - 1]                                     # (N-1, 1)
     weighted = lambda_ * Uhat_provs ** kappa
-    lambda2 = weighted / weighted.sum()                            # (N-1, 1)
+    if frozen_idx:
+        # Pin frozen provinces at baseline labor share; remaining workers
+        # (1 - Σ_frozen λ) get distributed across the free provinces by Frechet.
+        frozen_mask = np.zeros(N - 1, dtype=bool)
+        for k in frozen_idx:
+            frozen_mask[k] = True
+        free_mask = ~frozen_mask
+        lambda2 = lambda_.copy()
+        free_sum = weighted[free_mask].sum()
+        remaining = 1.0 - lambda_[frozen_mask].sum()
+        lambda2[free_mask] = weighted[free_mask] / free_sum * remaining
+    else:
+        lambda2 = weighted / weighted.sum()                        # (N-1, 1)
 
     # Aggregate changes
     omega = b.omega

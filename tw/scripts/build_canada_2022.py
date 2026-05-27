@@ -1,9 +1,11 @@
-"""Build a fresh ``canada_2022/`` calibration for the Tombe-Winter model.
+"""Build a fresh ``canada_{year}_rebuild/`` calibration for the Tombe-Winter model.
 
-This is Phase 4a of the refresh: pulls the most recent StatCan + OECD ICIO
-data and rebuilds every parquet under ``data/inputs/canada_2022/`` at the
-same schema as ``canada_2010/``. The model and counterfactual scripts run
-unchanged against the new calibration.
+Parameterized by `--year`. Default 2022 (writes to ``canada_2022/``); for any
+other year writes to ``canada_{year}_rebuild/`` so the manually-curated
+canada_2010 (from maindata.mat) isn't clobbered. Pulls StatCan + OECD ICIO
+data for the chosen year and rebuilds every parquet at the same schema as
+``canada_2010/``. The model and counterfactual scripts run unchanged against
+the new calibration.
 
 What's refreshed (the fast-moving primitives):
 - Provincial bilateral trade flows (StatCan 12-10-0088-01, year 2022).
@@ -25,15 +27,18 @@ What's NOT refreshed (carried over from canada_2010/):
 - Trade elasticities ``θ^j`` — AT-2016 / CP-2015 vector, static.
 - Sector labels.
 
-Prep (one-time):
+Prep (one-time, year-specific):
     mkdir -p /tmp/icio && unzip -o ~/Downloads/2016-2022_SML.zip 2022_SML.csv -d /tmp/icio/
+    # or for 2010: unzip -o ~/Downloads/2006-2010_SML.zip 2010_SML.csv -d /tmp/icio/
 
 Run from tw/:
-    uv run python scripts/build_canada_2022.py
+    uv run python scripts/build_canada_2022.py                # 2022 default
+    uv run python scripts/build_canada_2022.py --year 2010    # 2010 rebuild
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import shutil
@@ -44,17 +49,22 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-REFRESH_YEAR = 2022
-
 # ─── Paths ────────────────────────────────────────────────────────────────
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data" / "inputs"
-SRC_DIR = DATA_ROOT / "canada_2010"
-OUT_DIR = DATA_ROOT / "canada_2022"
+SRC_DIR = DATA_ROOT / "canada_2010"          # source of static carry-overs
 CACHE_DIR = Path("/tmp/statcan_tw_refresh")
-ICIO_CSV = Path("/tmp/icio/2022_SML.csv")
-STATCAN_TRADE_CSV = Path("/tmp/sc12100088/12100088.csv")  # already cached from AKT work
+STATCAN_TRADE_CSV = Path("/tmp/sc12100088/12100088.csv")  # may need refetch
 
 WDS_BASE = "https://www150.statcan.gc.ca/t1/wds/rest"
+
+# USD/CAD annual averages (Bank of Canada) — used to convert ICIO USD-millions
+# to CAD-millions for the WLD-WLD intra-trade row.
+USD_TO_CAD: dict[int, float] = {
+    2010: 1.0299, 2011: 0.9891, 2012: 0.9996, 2013: 1.0299,
+    2014: 1.1045, 2015: 1.2787, 2016: 1.3248, 2017: 1.2986,
+    2018: 1.2957, 2019: 1.3269, 2020: 1.3415, 2021: 1.2535,
+    2022: 1.3011,
+}
 
 # ─── Sector taxonomy (TW's 22 ISIC Rev 3 sectors, in canonical order) ─────
 SECTORS = (
@@ -191,7 +201,7 @@ def _fetch_statcan(pid: str) -> Path:
 _PRODUCT_RE = re.compile(r"\[(M[0-9A-Z]+)\]")
 
 
-def build_bilateral_trade(year: int = REFRESH_YEAR) -> pd.DataFrame:
+def build_bilateral_trade(year: int) -> pd.DataFrame:
     """Return long-form (sector, destination, source, value) for all 11 regions.
 
     Province-to-province + province-to-WLD + WLD-to-province come from
@@ -243,7 +253,7 @@ def build_bilateral_trade(year: int = REFRESH_YEAR) -> pd.DataFrame:
 
 
 # ─── Step B: Provincial employment shares (lambda) from 14-10-0327 ────────
-def build_employment(year: int = REFRESH_YEAR) -> pd.DataFrame:
+def build_employment(year: int) -> pd.DataFrame:
     """Provincial employment shares from LFS (14-10-0327, active table)."""
     csv = _fetch_statcan("14100327")
     df = pd.read_csv(csv, low_memory=False, dtype={"VALUE": float})
@@ -266,7 +276,7 @@ def build_employment(year: int = REFRESH_YEAR) -> pd.DataFrame:
 
 
 # ─── Step C: Real income index (mu) from provincial GDP + spatial prices ──
-def build_income_index(year: int = REFRESH_YEAR) -> pd.DataFrame:
+def build_income_index(year: int) -> pd.DataFrame:
     """μ_n = (GDP/capita_n / national average GDP/capita) / (spatial_price_n /
     national average price). Uses 18-10-0003 for spatial prices (last
     available year is 2019); GDP per capita from 36-10-0222 + 17-10-0005.
@@ -295,12 +305,20 @@ def build_income_index(year: int = REFRESH_YEAR) -> pd.DataFrame:
     pop = pop.dropna(subset=["region", "VALUE"]).drop_duplicates("region")
     pop = pop.set_index("region")["VALUE"]
 
-    # Spatial prices: last available year (2019), all-items index for each
-    # provincial capital (St. John's, Charlottetown, Halifax, …). Toronto
-    # and Ottawa average for Ontario, as in Albrecht-Tombe (2016).
+    # Spatial prices: target the requested year if available, else fall back
+    # to the closest year. Table 18-10-0003 was retired in 2019; for 2010 the
+    # historical CSV still contains the 2010 row.
     sp = pd.read_csv(sp_csv, low_memory=False, dtype={"VALUE": float})
     sp["year"] = pd.to_numeric(sp["REF_DATE"].astype(str).str[:4], errors="coerce")
-    sp = sp[sp["year"] == sp["year"].max()]              # 2019
+    available_years = sorted(sp["year"].dropna().unique().astype(int))
+    target_year = year if year in available_years else min(
+        available_years, key=lambda y: abs(y - year)
+    )
+    if target_year != year:
+        print(f"    spatial prices: target {year} unavailable; "
+              f"using closest year {target_year} (available range "
+              f"{min(available_years)}-{max(available_years)})")
+    sp = sp[sp["year"] == target_year]
     sp = sp[sp["Products and product groups"] == "All-items"]
     # 18-10-0003 reports per-city, not per-province. Map cities → province
     # short codes; for provinces with multiple cities (ON, AB) take the
@@ -336,8 +354,7 @@ def build_income_index(year: int = REFRESH_YEAR) -> pd.DataFrame:
 
 
 # ─── Step D: Aggregate fiscal transfers from 36-10-0450 ───────────────────
-def build_transfers_share_gdp(year_lo: int = 2014, year_hi: int = REFRESH_YEAR
-                                ) -> pd.DataFrame:
+def build_transfers_share_gdp(year_lo: int, year_hi: int) -> pd.DataFrame:
     """Average per-capita net fiscal transfer relative to the Canadian mean,
     expressed as a share of provincial GDP. Aggregates federal + CPP rev &
     expenditure across years 2014-2022 (or whatever range).
@@ -404,8 +421,7 @@ def _icio_origin_country(label: str) -> tuple[str, str]:
     return c, i
 
 
-def build_icio_primitives(year_csv: Path = ICIO_CSV
-                            ) -> dict[str, pd.DataFrame | float]:
+def build_icio_primitives(year_csv: Path) -> dict[str, pd.DataFrame | float]:
     """Pull canada-aggregate IO + share parameters + WLD trade from ICIO 2022.
 
     Returns a dict with:
@@ -522,36 +538,62 @@ def build_icio_primitives(year_csv: Path = ICIO_CSV
 
 # ─── Step F: stitch everything together and write parquets ────────────────
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--year", type=int, default=2022,
+                        help="Calibration year (default: 2022)")
+    parser.add_argument("--transfers-window", type=int, default=None,
+                        help="Half-width of years around --year for transfers "
+                             "(default: year_lo=max(year-2, 2008), year_hi=year+2 "
+                             "capped at latest available)")
+    args = parser.parse_args()
+    year = args.year
+
+    icio_csv = Path(f"/tmp/icio/{year}_SML.csv")
+    # canada_2010 already exists (from maindata.mat); write to _rebuild suffix
+    # so it isn't clobbered when comparing primary-source rebuild to MAT data.
+    out_dir = DATA_ROOT / (f"canada_{year}" if year == 2022
+                            else f"canada_{year}_rebuild")
+
     if not STATCAN_TRADE_CSV.exists():
         raise FileNotFoundError(f"missing {STATCAN_TRADE_CSV}; "
                                   f"fetch StatCan 12-10-0088 first")
-    if not ICIO_CSV.exists():
-        raise FileNotFoundError(f"missing {ICIO_CSV}; extract via "
-                                  f"unzip -o ~/Downloads/2016-2022_SML.zip 2022_SML.csv -d /tmp/icio/")
+    if not icio_csv.exists():
+        raise FileNotFoundError(f"missing {icio_csv}; extract via\n"
+                                  f"  unzip -o ~/Downloads/<SML zip> "
+                                  f"{year}_SML.csv -d /tmp/icio/")
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Building canada_{REFRESH_YEAR} calibration in {OUT_DIR} …\n")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Building canada_{year} calibration in {out_dir} …\n")
 
     # ── A. Provincial bilateral trade ──────────────────────────────────────
-    print(f"  [A] Provincial bilateral trade ({REFRESH_YEAR})")
-    bilateral = build_bilateral_trade(REFRESH_YEAR)
+    print(f"  [A] Provincial bilateral trade ({year})")
+    bilateral = build_bilateral_trade(year)
 
     # ── B. Employment shares ───────────────────────────────────────────────
     print(f"  [B] Employment shares")
-    employment = build_employment(REFRESH_YEAR)
+    employment = build_employment(year)
 
     # ── C. Real income index ───────────────────────────────────────────────
     print(f"  [C] Real income index (μ)")
-    income_index = build_income_index(REFRESH_YEAR)
+    income_index = build_income_index(year)
 
     # ── D. Aggregate fiscal transfers ─────────────────────────────────────
-    print(f"  [D] Aggregate fiscal transfers (2014-{REFRESH_YEAR})")
-    transfers = build_transfers_share_gdp()
+    # Default: 5-year window centered on `year`, clipped at 2008 (start of
+    # 36-10-0450 panel). Lets the transfers series be smoothed without using
+    # post-year data when reproducing a historical baseline.
+    if args.transfers_window is not None:
+        year_lo = max(year - args.transfers_window, 2008)
+        year_hi = year + args.transfers_window
+    else:
+        year_lo = max(year - 2, 2008)
+        year_hi = year + 2
+    print(f"  [D] Aggregate fiscal transfers ({year_lo}-{year_hi})")
+    transfers = build_transfers_share_gdp(year_lo, year_hi)
 
     # ── E. ICIO WLD-WLD intra-trade only (industrial structure carried
     # over from canada_2010 below). ──────────────────────────────────────
-    print(f"  [E] ICIO 2022 WLD-WLD intra-trade (for WLD column)")
-    icio = build_icio_primitives()
+    print(f"  [E] ICIO {year} WLD-WLD intra-trade (for WLD column)")
+    icio = build_icio_primitives(icio_csv)
 
     # Need to add WLD-WLD intra-trade row to bilateral; convert from USD M to
     # the same units as StatCan flows. Compute scale from total Canadian gross
@@ -564,14 +606,14 @@ def main() -> None:
     # ICIO Canada gross output (this is rough; OK for first-pass refresh)
     scale = can_provincial_output / icio["can_gross_usd"] if icio["can_gross_usd"] > 0 else 1.25
 
-    # WLD-WLD intra-trade: ICIO 2022 (USD millions) → CAD millions via the
-    # USD/CAD = 1.30 (2022 average). Then write into bilateral.
-    USD_TO_CAD_2022 = 1.30
+    # WLD-WLD intra-trade: ICIO USD millions → CAD millions via BoC annual
+    # average. Then write into bilateral.
+    usd_to_cad = USD_TO_CAD.get(year, 1.30)
     wld_rows = pd.DataFrame({
         "sector": list(SECTORS),
         "destination": [WLD] * len(SECTORS),
         "source": [WLD] * len(SECTORS),
-        "value": (icio["wld_intra"] * USD_TO_CAD_2022).tolist(),
+        "value": (icio["wld_intra"] * usd_to_cad).tolist(),
     })
     bilateral_dollars = pd.concat(
         [bilateral[~((bilateral["destination"] == WLD) & (bilateral["source"] == WLD))],
@@ -592,16 +634,16 @@ def main() -> None:
     bilateral["value"] = bilateral["value"] / totals_by_dest_sec.where(totals_by_dest_sec > 0, 1.0)
 
     # ── Write all parquets ─────────────────────────────────────────────────
-    bilateral.to_parquet(OUT_DIR / "bilateral_trade.parquet", index=False)
+    bilateral.to_parquet(out_dir / "bilateral_trade.parquet", index=False)
     print(f"\n  bilateral_trade.parquet      {len(bilateral):,} rows  (π shares)")
 
-    employment.to_parquet(OUT_DIR / "employment.parquet", index=False)
+    employment.to_parquet(out_dir / "employment.parquet", index=False)
     print(f"  employment.parquet           {len(employment)} provinces")
 
-    income_index.to_parquet(OUT_DIR / "income_index.parquet", index=False)
+    income_index.to_parquet(out_dir / "income_index.parquet", index=False)
     print(f"  income_index.parquet         {len(income_index)} provinces")
 
-    transfers.to_parquet(OUT_DIR / "transfers_share_gdp.parquet", index=False)
+    transfers.to_parquet(out_dir / "transfers_share_gdp.parquet", index=False)
     print(f"  transfers_share_gdp.parquet  {len(transfers)} provinces")
 
     # Industrial-structure parquets (io_matrix, labor_share, final_demand_share,
@@ -611,11 +653,11 @@ def main() -> None:
     # I_n (baseline absorption share) and S_n (trade surplus share) were
     # computed from dollar flows above. Write them now.
     pd.DataFrame({"region": REGIONS, "value": I.to_numpy()}).to_parquet(
-        OUT_DIR / "income_baseline.parquet", index=False)
+        out_dir / "income_baseline.parquet", index=False)
     print(f"  income_baseline.parquet      {len(REGIONS)} regions")
 
     pd.DataFrame({"region": REGIONS, "value": Sn.to_numpy()}).to_parquet(
-        OUT_DIR / "Sn_baseline.parquet", index=False)
+        out_dir / "Sn_baseline.parquet", index=False)
     print(f"  Sn_baseline.parquet          {len(REGIONS)} regions")
 
     # trade_surplus per region as fraction of own expenditure (S_n / I_n,
@@ -623,7 +665,7 @@ def main() -> None:
     # imbalance (≈ 0); for provinces, ratio of net exports to absorption.
     surplus_gdp = (Sn / I).fillna(0).replace([np.inf, -np.inf], 0)
     pd.DataFrame({"region": REGIONS, "value": surplus_gdp.to_numpy()}).to_parquet(
-        OUT_DIR / "trade_surplus.parquet", index=False)
+        out_dir / "trade_surplus.parquet", index=False)
     print(f"  trade_surplus.parquet        {len(REGIONS)} regions")
 
     # ── Static carry-over from canada_2010 ────────────────────────────────
@@ -635,7 +677,7 @@ def main() -> None:
         "final_demand_share.parquet", "intermediate_share.parquet",
     )
     for fname in carried:
-        shutil.copy(SRC_DIR / fname, OUT_DIR / fname)
+        shutil.copy(SRC_DIR / fname, out_dir / fname)
     print(f"\n  copied {len(carried)} static files from canada_2010/")
     print(f"\nDone.\n")
 

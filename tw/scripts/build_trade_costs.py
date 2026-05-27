@@ -190,8 +190,15 @@ def waugh_regression(
         y = obs_arr[:, 2]
         logd = obs_arr[:, 3]
         _, gamma, imp_fe, exp_fe, r2 = _gravity_regression(y, logd, n_idx, i_idx, N)
-        # AT-2016 appendix: ln(t_r/t_ref) = -(ι_r + η_r) / θ
-        log_t = -(imp_fe + exp_fe) / theta_j
+        # Identify exporter-specific cost from the EXPORTER FE only.
+        # In the gravity regression
+        #   ln(π_{n,i}/π_{n,n}) = γ ln(d̄_{n,i}) + ι_n + η_i + ε
+        # under τ_{n,i} = τ̄_{n,i} × t_i, the exporter FE absorbs -θ ln(t_i),
+        # so ln(t_i) = -η_i/θ. Empirical test against canada_2010's tauhat_asym
+        # shows this convention (a) recovers a t_WLD ≈ 0.81 matching MAT's
+        # backed-out value vs WLD = 2.47 from the previous symmetric formula
+        # ln(t_r) = -(ι_r + η_r)/θ, and (b) lifts cell-level corr from 0.20 → 0.66.
+        log_t = -exp_fe / theta_j
         t[:, j] = np.exp(log_t)
         rows.append((sectors[j], gamma, r2, len(obs)))
     coefs = pd.DataFrame(rows, columns=["sector", "gamma", "r2", "n_obs"])
@@ -203,16 +210,23 @@ def distance_regression(
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """Per-sector regression ln(τ̄_{ni}) = δ^j ln(d̄_{ni}) + ι_n + η_i + ε.
 
+    AT-2016 fit this on INTERPROVINCIAL pairs only — the WLD centroid (US
+    population-weighted) is a poor distance proxy for international trade,
+    and including WLD pairs distorts the slope. We exclude pairs involving
+    "WLD" from the regression sample to match.
+
     Returns (delta, coefs) — δ^j per sector + diagnostic frame.
     """
     N, _, J = tau_bar.shape
+    wld_idx = regions.index("WLD") if "WLD" in regions else -1
     delta = np.full(J, np.nan)
     rows = []
     for j in range(J):
         obs = []
         for n in range(N):
+            if n == wld_idx: continue
             for i in range(N):
-                if n == i:
+                if n == i or i == wld_idx:
                     continue
                 tb = tau_bar[n, i, j]
                 if np.isnan(tb) or tb <= 0:
@@ -235,15 +249,23 @@ def distance_regression(
 
 def build_shocks(
     tau_bar: np.ndarray, t: np.ndarray, delta: np.ndarray, d_bar: np.ndarray,
+    regions: list[str] | None = None,
 ) -> dict[str, np.ndarray]:
     """Apply AT-2016 counterfactuals to produce three shock tensors.
 
     Indexing convention (matches canada_2010 long-form parquet):
       arr[i_source, n_dest, j_sector] = shock for shipment from i to n in sector j.
 
+    AT-2016 / maindata.mat convention: ``tauhat_dist`` is set to 1.0 (no shock)
+    for any pair involving WLD — the WLD centroid is a poor distance proxy for
+    international trade and AT did not apply the distance decomposition to
+    international flows. ``tauhat_all`` and ``tauhat_asym`` ARE computed for
+    WLD pairs.
+
     Defaults to 1 (no shock) wherever any input is NaN.
     """
     N, _, J = tau_bar.shape
+    wld_idx = regions.index("WLD") if regions is not None and "WLD" in regions else -1
     tauhat_all = np.ones((N, N, J))
     tauhat_asym = np.ones((N, N, J))
     tauhat_dist = np.ones((N, N, J))
@@ -261,7 +283,7 @@ def build_shocks(
                 # artefact of regression noise; shock should never raise cost.
                 tauhat_all[i, n, j] = min(1.0, 1.0 / tau)
                 tauhat_asym[i, n, j] = min(1.0, t_n / t_i)
-                if not np.isnan(delta[j]):
+                if not np.isnan(delta[j]) and i != wld_idx and n != wld_idx:
                     # Cap at 1: removing non-distance can only reduce or leave cost
                     # unchanged (matches canada_2010 maindata.mat convention).
                     tauhat_dist[i, n, j] = min(1.0, (d_bar[n, i] ** delta[j]) / tb)
@@ -286,7 +308,14 @@ def reshape_to_long(
 
 
 def main() -> None:
-    root = Path(__file__).resolve().parent.parent / "data" / "inputs" / "canada_2022"
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--calibration", default="canada_2022",
+                        help="Calibration directory under data/inputs/ "
+                             "(default: canada_2022)")
+    args = parser.parse_args()
+    root = (Path(__file__).resolve().parent.parent / "data" / "inputs"
+            / args.calibration)
 
     # ── Load inputs ───────────────────────────────────────────────────────
     bt = pd.read_parquet(root / "bilateral_trade.parquet")
@@ -362,7 +391,7 @@ def main() -> None:
     print()
 
     # ── Step 5: build shocks ──────────────────────────────────────────────
-    shocks = build_shocks(tau_bar, t_ij, delta, d_bar)
+    shocks = build_shocks(tau_bar, t_ij, delta, d_bar, regions=regions)
     for name, arr in shocks.items():
         df = reshape_to_long(arr, sectors, regions)
         off = df[df.source != df.destination]

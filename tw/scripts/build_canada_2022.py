@@ -87,7 +87,11 @@ PROV_FULL_TO_SHORT = dict(zip(PROVINCES_FULL, PROVINCES_SHORT))
 WLD = "WLD"
 REGIONS = PROVINCES_SHORT + (WLD,)
 
-# ─── Concordance: StatCan 12-10-0088 M-codes → TW 22 sectors ──────────────
+# ─── Concordance: StatCan 12-10-0088 product codes → TW 22 sectors ────────
+# Includes M-prefixed (business sector), G-prefixed (government sector
+# services), and N-prefixed (NPISH services) commodities. F-prefixed
+# (fictive materials/services/margins) and P-prefixed (taxes on products)
+# are SUT balancing entries and excluded from the product regex.
 MCODE_TO_TW: dict[str, str] = {
     # Agriculture, Mining (ISIC 01-14)
     "M111B": "Agriculture, Mining", "M112A": "Agriculture, Mining",
@@ -134,6 +138,15 @@ MCODE_TO_TW: dict[str, str] = {
     "M6100": "Education",
     "M6200": "Health and Social",
     "M7100": "Other Services", "M8100": "Other Services", "M9A00": "Other Services",
+    # Government-sector commodities (StatCan reports separately from M-codes)
+    "G6100": "Education",
+    "G6200": "Health and Social",
+    "G9110": "Public Admin.",
+    "G9120": "Public Admin.",
+    "G9130": "Public Admin.",
+    "G9140": "Public Admin.",
+    # NPISH services (Non-Profit Institutions Serving Households)
+    "N0000": "Other Services",
 }
 
 # ─── Concordance: ICIO ISIC Rev 4 industries → TW 22 sectors ──────────────
@@ -198,7 +211,7 @@ def _fetch_statcan(pid: str) -> Path:
 
 
 # ─── Step A: Provincial bilateral trade (PI) from StatCan 12-10-0088 ──────
-_PRODUCT_RE = re.compile(r"\[(M[0-9A-Z]+)\]")
+_PRODUCT_RE = re.compile(r"\[([MGN][0-9A-Z]+)\]")
 
 
 def build_bilateral_trade(year: int) -> pd.DataFrame:

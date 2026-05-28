@@ -17,7 +17,7 @@ Replicates Tombe, T., & Winter, J. (2021). Fiscal integration with internal trad
 | Employment λ | `maindata.mat` | StatCan 14-10-0327 (2010) | StatCan 14-10-0327 (2022) |
 | GDP, population | `maindata.mat` | StatCan 36-10-0222 + 17-10-0005 (2010) | StatCan 36-10-0222 + 17-10-0005 (2022) |
 | Spatial price index | `maindata.mat` | StatCan 18-10-0003 (2010) | StatCan 18-10-0003 (2019; table retired) |
-| Fiscal transfers T | `maindata.mat` | StatCan 36-10-0450 (2008–2012 avg) | StatCan 36-10-0450 (2020–2024 avg) |
+| Fiscal transfers T | `maindata.mat` | StatCan 36-10-0450 (2010, single year, matching TW §3.3) | StatCan 36-10-0450 (2022, single year) |
 | WLD intra-trade (ICIO row) | `maindata.mat` | OECD ICIO 2010 SML | OECD ICIO 2022 SML |
 | Industrial structure (α, γ, φ, IO) | `maindata.mat` | National L97 IOT 2010 (StatCan 15-211-X) | National Detail IOT 2022 (StatCan 15-211-X) |
 | Trade-cost shocks (`tauhat_*`) | `maindata.mat` (from AT-2016) | rebuilt from 2010 PI via AT-2016 method | rebuilt from 2022 PI via AT-2016 method |
@@ -29,17 +29,17 @@ Replicates Tombe, T., & Winter, J. (2021). Fiscal integration with internal trad
 
 | Prov | Paper | MAT'10 | Rep'10 | Full'22 |
 |---|---:|---:|---:|---:|
-| BC | -1.7 | -1.67 | -1.57 | -2.38 |
-| AB | -8.3 | -8.31 | -7.13 | -5.34 |
-| SK | -0.9 | -0.85 | -0.06 | +0.78 |
-| MB | +7.2 | +7.20 | +8.34 | +8.45 |
-| ON | -0.8 | -0.77 | -0.74 | -1.48 |
-| QC | +3.4 | +3.39 | +4.62 | +5.15 |
-| NB | +15.6 | +15.55 | +17.45 | +19.91 |
-| NS | +17.1 | +17.12 | +21.92 | +21.98 |
-| PE | +29.8 | +29.75 | +33.21 | +33.28 |
-| NL | +10.4 | +10.40 | +8.38 | +7.78 |
-| **CAN** | **-0.7** | **-0.74** | **-0.72** | **-0.26** |
+| BC | -1.7 | -1.67 | -1.19 | -2.62 |
+| AB | -8.3 | -8.31 | -7.41 | -4.26 |
+| SK | -0.9 | -0.85 | -0.43 | +1.35 |
+| MB | +7.2 | +7.20 | +7.91 | +11.72 |
+| ON | -0.8 | -0.77 | -0.31 | -1.86 |
+| QC | +3.4 | +3.39 | +3.94 | +4.44 |
+| NB | +15.6 | +15.55 | +16.88 | +20.87 |
+| NS | +17.1 | +17.12 | +19.40 | +22.87 |
+| PE | +29.8 | +29.75 | +34.67 | +57.47 |
+| NL | +10.4 | +10.40 | +9.93 | +9.40 |
+| **CAN** | **-0.7** | **-0.74** | **-0.76** | **-0.17** |
 
 ### Col 2 — Equalization only
 
@@ -190,11 +190,11 @@ Replicates Tombe, T., & Winter, J. (2021). Fiscal integration with internal trad
 
 | Scenario | Prov | Paper | MAT'10 | Rep'10 | Full'22 |
 |---|---|---:|---:|---:|---:|
-| New West | BC | +1.53 | +1.53 | +1.54 | +1.57 |
-| | AB | +1.37 | +1.37 | +1.30 | +1.40 |
-| | SK | +3.17 | +3.17 | +3.16 | +3.27 |
-| ON–QC | ON | +1.22 | +1.22 | +1.08 | +0.92 |
-| | QC | +2.39 | +2.39 | +2.34 | +2.31 |
-| Maritime | NB | +1.07 | +1.07 | +1.15 | +1.27 |
-| | NS | +1.01 | +1.01 | +1.32 | +1.15 |
-| | PE | +3.19 | +3.19 | +3.74 | +5.68 |
+| New West | BC | +1.53 | +1.53 | +1.56 | +1.55 |
+| | AB | +1.37 | +1.37 | +1.29 | +1.44 |
+| | SK | +3.17 | +3.17 | +3.14 | +3.31 |
+| ON–QC | ON | +1.22 | +1.22 | +1.09 | +0.92 |
+| | QC | +2.39 | +2.39 | +2.29 | +2.27 |
+| Maritime | NB | +1.07 | +1.07 | +1.14 | +1.29 |
+| | NS | +1.01 | +1.01 | +1.23 | +1.17 |
+| | PE | +3.19 | +3.19 | +3.87 | +8.48 |

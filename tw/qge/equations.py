@@ -65,6 +65,11 @@ def model_equations(
                                           # and dL_p = 1; the Frechet pool is
                                           # restricted to the remaining provinces
                                           # sharing (1 - Σ_{frozen} λ) workers.
+    kappa_override: np.ndarray | float | None = None,
+                                          # per-province Frechet elasticity. If
+                                          # scalar or None, uses b.kappa uniformly.
+                                          # If array of shape (N-1,) or (N-1, 1),
+                                          # gives each province its own κ.
 ) -> ModelOutputs:
     """One pass of the hat-algebra inner loop. Returns all derived quantities.
 
@@ -169,7 +174,13 @@ def model_equations(
 
     # Migration: lambda2 = lambda * Uhat^κ / sum(lambda * Uhat^κ)
     Uhat_provs = Uhat[: N - 1]                                     # (N-1, 1)
-    weighted = lambda_ * Uhat_provs ** kappa
+    if kappa_override is None:
+        kappa_eff = kappa
+    elif np.isscalar(kappa_override):
+        kappa_eff = float(kappa_override)
+    else:
+        kappa_eff = np.asarray(kappa_override).reshape(N - 1, 1)
+    weighted = lambda_ * Uhat_provs ** kappa_eff
     if frozen_idx:
         # Pin frozen provinces at baseline labor share; remaining workers
         # (1 - Σ_frozen λ) get distributed across the free provinces by Frechet.
@@ -189,7 +200,7 @@ def model_equations(
     omega2 = b.omega2
     aggregate_rGDPhat = float((omega * realGDPhat[: N - 1] * lambda2 / lambda_).sum())
     aggregate_Uhat = float((omega2 * Uhat_provs * lambda2 / lambda_).sum())
-    aggregate_gain = float((lambda_ * Uhat_provs * (lambda2 / lambda_) ** (-1 / kappa)).sum())
+    aggregate_gain = float((lambda_ * Uhat_provs * (lambda2 / lambda_) ** (-1 / kappa_eff)).sum())
 
     return ModelOutputs(
         Phat=Phat, PIhat=PIhat, PInew=PInew, chat=chat, Sn=Sn,

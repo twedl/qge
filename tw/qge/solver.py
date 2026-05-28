@@ -77,13 +77,14 @@ def residual(
     Ahat: np.ndarray | None = None,
     Sn_override: np.ndarray | None = None,
     frozen_idx: tuple[int, ...] = (),
+    kappa_override: np.ndarray | float | None = None,
 ) -> np.ndarray:
     """Stacked residual matching solve_model.m's objective."""
     N = baseline.N
     what, dL = _unpack(V, N, frozen_idx)
     out = model_equations(baseline, what, dL,
                           tauhat=tauhat, Ahat=Ahat, Sn_override=Sn_override,
-                          frozen_idx=frozen_idx)
+                          frozen_idx=frozen_idx, kappa_override=kappa_override)
     res1 = (out.what1[0, : N - 1] - what[0, : N - 1])          # (N-1,)
     res2 = np.array([out.Inew.sum() - 1.0])                    # (1,)
     res3_full = (out.lambda2.ravel() / baseline.lambda_.ravel()
@@ -105,6 +106,7 @@ def solve(
     Ahat: np.ndarray | None = None,
     Sn_override: np.ndarray | None = None,
     frozen_idx: tuple[int, ...] = (),
+    kappa_override: np.ndarray | float | None = None,
     method: str = "hybr",
     tol: float = 1e-10,
     initial_guess: np.ndarray | None = None,
@@ -118,13 +120,14 @@ def solve(
     def f(V: np.ndarray) -> np.ndarray:
         return residual(V, baseline,
                         tauhat=tauhat, Ahat=Ahat, Sn_override=Sn_override,
-                        frozen_idx=frozen_idx)
+                        frozen_idx=frozen_idx, kappa_override=kappa_override)
     res = root(f, V0, method=method, tol=tol)
 
     what, dL = _unpack(res.x, N, frozen_idx)
     outputs = model_equations(baseline, what, dL,
                               tauhat=tauhat, Ahat=Ahat, Sn_override=Sn_override,
-                              frozen_idx=frozen_idx)
+                              frozen_idx=frozen_idx,
+                              kappa_override=kappa_override)
     if verbose:
         print(f"  solver: {'OK' if res.success else 'FAIL'}, "
               f"|residual|∞={np.abs(res.fun).max():.2e}, nfev={res.nfev}")

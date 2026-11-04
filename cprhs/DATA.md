@@ -192,14 +192,6 @@ Both `(sector, destination, source, value)`, `J · N · N` rows. `kappa_hat` mat
 
 **Canadian analogue:** would require estimating Canadian provincial gravity coefficients. Separate research project.
 
-### `geography/popweighted_distance_2021.parquet`
-
-`(destination, source, measure, regions, value)`, value in km, symmetric. Head-Mayer population-weighted effective distances between (and within) provinces and territories, over all pairs of 2021 Census dissemination areas: `measure ∈ {arith, rho_0.5, geom, rho_-0.5, harm}` is the power-mean exponent ρ ∈ {1, 0.5, 0, −0.5, −1}; `regions` is 13 (NT, NU separate) or 12 (`NT_NU` merged). The diagonal is the internal distance `d_nn` for log-normalized distance `d_ni / √(d_nn d_ii)` — a population-based alternative to the area-based `(2/3)√(area/π)`.
-
-**Source:** StatCan Geographic Attribute File 2021 (92-151-X) — DB population and land area, DA population-weighted representative points. Built by `scripts/build_popweighted_distance.py`; the GAF must be downloaded by hand (www12.statcan.gc.ca blocks scripted access).
-
-**Used by:** `scripts/dty_replication.py`, which replicates Díez, Tombe & Yang (2026) non-distance internal trade costs from StatCan 12-10-0101 (2021 detail flows), 36-10-0478 (detail supply table, for the product → IOIC industry split), and FGO-2022 ProTEE θ; download URLs are in its docstring.
-
 ---
 
 ## Suggested order for assembling a Canadian Benchmark calibration

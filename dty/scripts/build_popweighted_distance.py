@@ -28,7 +28,7 @@ Output: data/geography/popweighted_distance_2021.parquet, long form
 value in km; symmetric. regions = 13 (NT and NU separate) or 12 (NT+NU
 merged as "NT_NU", the AKT-2019 convention).
 
-Run from cprhs/:
+Run from dty/:
     uv run python scripts/build_popweighted_distance.py
 """
 

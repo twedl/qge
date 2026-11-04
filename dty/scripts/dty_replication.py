@@ -40,7 +40,7 @@ Inputs (in --raw, default ~/Downloads):
   hssicnaics_20181015.zip  Pierce-Schott HS→NAICS concordance
       https://spinup-000d1a-wp-offload-media.s3.amazonaws.com/faculty/wp-content/uploads/sites/47/2019/06/hssicnaics_20181015.zip
 
-Run from cprhs/:
+Run from dty/:
     uv run python scripts/dty_replication.py [--raw DIR]
 """
 
@@ -58,6 +58,7 @@ YEAR = 2021
 MIN_OBS = 30
 THETA_SERVICES = 5.0
 DISTANCES = ["rho_0.5", "geom", "rho_-0.5"]
+HEADLINE = "rho_-0.5"  # matches DTY's uniform-θ robustness levels (θ = 4, 8 → 12.8, 5.5 %)
 
 REGIONS = {"British Columbia": "BC", "Alberta": "AB", "Saskatchewan": "SK", "Manitoba": "MB",
            "Ontario": "ON", "Quebec": "QC", "New Brunswick": "NB", "Nova Scotia": "NS",
@@ -111,6 +112,7 @@ def _table(txt: str) -> pd.Series:
 
 
 DTY = {"goods": _table(DTY_GOODS), "services": _table(DTY_SERVICES)}
+DTY_TABLE3 = pd.Series({s: v for s, (v, _) in DTY_SECTORS.items()}, name="DTY")
 
 
 def _csv_in_zip(path: Path) -> str:
@@ -265,6 +267,12 @@ def sector(code: str) -> str | None:
     return best[1]
 
 
+def sector_means(hr: pd.DataFrame, ng: pd.Series) -> pd.Series:
+    """Trade-weighted NG (%) per DTY Table 3 sector (market industries only)."""
+    t = pd.DataFrame({"sec": hr.ind.map(sector), "v": ng * hr.X_ni, "w": hr.X_ni}).dropna().groupby("sec").sum()
+    return 100 * t.v / t.w
+
+
 def score(hr: pd.DataFrame, ngL: pd.Series, theta: pd.Series) -> dict:
     ng = (np.exp(ngL / theta) - 1).clip(lower=0)
     r = {"NG": wavg(ng, hr.X_ni),
@@ -279,9 +287,7 @@ def score(hr: pd.DataFrame, ngL: pd.Series, theta: pd.Series) -> dict:
         r[f"ρprov_{kind[0]}"] = m[prov].ours.corr(m[prov].DTY, method="spearman")
         r[f"MAEprov_{kind[0]}"] = (m[prov].ours - m[prov].DTY).abs().mean()
         r[f"ρterr_{kind[0]}"] = m[~prov].ours.corr(m[~prov].DTY, method="spearman")
-    sec = hr.ind.map(sector)
-    t = pd.DataFrame({"sec": sec, "v": ng * hr.X_ni, "w": hr.X_ni}).dropna().groupby("sec").sum()
-    t = pd.concat([100 * t.v / t.w, pd.Series({s: v for s, (v, _) in DTY_SECTORS.items()})], axis=1, join="inner")
+    t = pd.concat([sector_means(hr, ng), DTY_TABLE3], axis=1, join="inner")
     r["ρTable3"] = t.iloc[:, 0].corr(t.iloc[:, 1], method="spearman")
     return r
 
@@ -299,7 +305,7 @@ def main() -> None:
     shares = supply_shares(raw / "36100478-eng.zip")
     builds = {"supc3": industries_supc3(flows, theta_p), "supply": industries_supply(flows, theta_p, shares)}
 
-    rows, goods = [], {}
+    rows, goods, sectors = [], {}, {}
     for name, (f, th) in builds.items():
         hr = head_ries(f)
         theta, grp = hr.ind.map(th), regression_groups(hr)
@@ -308,8 +314,9 @@ def main() -> None:
         for measure in DISTANCES:
             ngL = non_distance(hr, log_rel_distance(hr, measure), grp)
             rows.append({"industries": name, "distance": measure, **score(hr[ok], ngL[ok], theta[ok])})
-            if measure == "geom":
-                goods[name] = bilateral(hr[ok], (np.exp(ngL[ok] / theta[ok]) - 1).clip(lower=0), "goods")
+            if measure == HEADLINE:
+                ng = (np.exp(ngL[ok] / theta[ok]) - 1).clip(lower=0)
+                goods[name], sectors[name] = bilateral(hr[ok], ng, "goods"), sector_means(hr[ok], ng)
 
     pd.set_option("display.width", 250)
     pd.set_option("display.float_format", lambda v: f"{v:.2f}")
@@ -317,9 +324,10 @@ def main() -> None:
     print(pd.DataFrame(rows).to_string(index=False))
     pd.set_option("display.float_format", lambda v: f"{v:5.1f}")
     for name, s in [*goods.items(), ("DTY Table 1", DTY["goods"])]:
-        print(f"\nGoods NG (%), provinces, rows = importer — {name}"
-              + (" (geometric distance)" if name in goods else ""))
+        print(f"\nGoods NG (%), provinces, rows = importer — {name}" + (f" ({HEADLINE})" if name in goods else ""))
         print(s.unstack().reindex(index=PROVINCES, columns=PROVINCES).to_string())
+    print(f"\nNG (%) by summary sector ({HEADLINE}) vs DTY Table 3")
+    print(pd.concat([DTY_TABLE3, pd.DataFrame(sectors)], axis=1).loc[DTY_TABLE3.index].to_string())
 
 
 if __name__ == "__main__":

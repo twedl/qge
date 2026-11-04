@@ -12,7 +12,7 @@ a non-distance part. The non-distance costs go into a 230-sector
 Caliendo–Parro model with interprovincial migration, which is not ported
 here. This directory reproduces only the estimation of those costs: Tables
 1–3 and the headline 9.3 % (goods 1.3 %, services 16.8 %). Results are in
-[`replication.md`](replication.md).
+[`REPLICATION.md`](REPLICATION.md).
 
 ## Method
 
